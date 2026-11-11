@@ -26,6 +26,12 @@ import {
   rememberNewBestie,
   stopFormerCheckIns,
 } from "./former";
+import { canStartLinkedChat } from "../channels/StartLinkedChat";
+import {
+  AskBestieAction,
+  ContextualAskPanel,
+  parseContextualAskTarget,
+} from "./ContextualAsk";
 
 export const inject = [
   "pages",
@@ -56,6 +62,29 @@ export const apply: PluginModule["apply"] = (ctx) => {
       );
     }),
   );
+  ctx.conversation.registerMessageAction({
+    id: "ask-bestie",
+    title: "Ask Bestie",
+    placement: "menu",
+    matches: (message, session) =>
+      canStartLinkedChat(session, message.channelId) &&
+      (!message.delivery || ["accepted", "seen"].includes(message.delivery)),
+    component: AskBestieAction,
+  });
+  ctx.panels.register({
+    id: "contextual-ask",
+    title: "Bestie chat",
+    matches: (target) => !!parseContextualAskTarget(target),
+    channelPlacement: "side",
+    component: (props) => (
+      <ContextualAskPanel
+        {...props}
+        relay={ctx.relay}
+        host={ctx}
+        extensions={ctx.conversation}
+      />
+    ),
+  });
   ctx.pages.register({
     id: "bestie",
     title: "Bestie",

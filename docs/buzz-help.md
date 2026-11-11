@@ -1461,6 +1461,14 @@ available rather than silently discarding it.
   it doesn't turn on **Remembers you** with the **Bestie** plugin on; turn that
   on in the agent's **Bestie** tab. While an agent's change is saving, **Make
   my bestie** and **Remove as bestie** ask you to try again.
+- With an eligible saved Bestie, open a channel message's menu and choose
+  **Ask {Bestie name}** beside **Start Solo chat**. It uses the saved Bestie's
+  name and avatar, and opens an ordinary private Solo draft in the existing
+  right panel while the source conversation stays in the main pane. The source
+  link is visible and editable. Nothing is sent and the agent is not woken until
+  you press Enter or Send. Closing the panel keeps the draft; after sending, the
+  chat remains in Solo. Reopening the same source resumes it. If no eligible
+  Bestie is available, the Ask action is absent and the ordinary action remains.
 - With the **Bestie** plugin on, open **Create an agent** in the left navigation
   when you haven’t chosen a Bestie. You can create one or choose an existing agent.
   The placeholder cycles through character avatars; reduced motion keeps it still.

@@ -341,7 +341,17 @@ test("the app runtime exposes ready bundled pages and removes them on disable", 
       services.panels
         .snapshot()
         .some((panel) => panel.pluginId === "buzz.bestie"),
-      false,
+      true,
+    );
+    assert.deepEqual(
+      services.conversation.actions
+        .snapshot()
+        .filter((action) =>
+          ["buzz.channels", "buzz.bestie"].includes(action.pluginId),
+        )
+        .map((action) => action.key)
+        .sort(),
+      ["buzz.bestie/ask-bestie", "buzz.channels/start-solo-chat"],
     );
     const bestiePage = services.pages
       .snapshot()
@@ -364,6 +374,16 @@ test("the app runtime exposes ready bundled pages and removes them on disable", 
       services.pages.snapshot().some((page) => page.pluginId === "buzz.bestie"),
       false,
     );
+    assert.deepEqual(
+      services.conversation.actions
+        .snapshot()
+        .filter((action) =>
+          ["buzz.channels", "buzz.bestie"].includes(action.pluginId),
+        )
+        .map((action) => action.key)
+        .sort(),
+      ["buzz.channels/start-solo-chat"],
+    );
     assert.equal(services.pages.snapshot().length, 4);
     await services.plugins.change("enable", "buzz.bestie");
     // Management completion is not activation completion; Cordis still owns import/disposal barriers.
@@ -383,7 +403,17 @@ test("the app runtime exposes ready bundled pages and removes them on disable", 
       services.panels
         .snapshot()
         .some((panel) => panel.pluginId === "buzz.bestie"),
-      false,
+      true,
+    );
+    assert.deepEqual(
+      services.conversation.actions
+        .snapshot()
+        .filter((action) =>
+          ["buzz.channels", "buzz.bestie"].includes(action.pluginId),
+        )
+        .map((action) => action.key)
+        .sort(),
+      ["buzz.bestie/ask-bestie", "buzz.channels/start-solo-chat"],
     );
     const page = services.pages.snapshot()[0];
     assert.match(

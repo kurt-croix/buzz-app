@@ -462,6 +462,15 @@ transcript copy remains. The shortcut uses ordinary Solo creation; it needs no n
 relay capability. The chat stays private until it is shared through the existing
 Share flow. A leading source link is not used for the chat's starting title.
 
+When Bestie is enabled with an eligible saved agent, a message's menu adds
+**Ask {Bestie name}** with the agent's avatar. It opens the
+same linked Solo draft in Channels' existing right side panel, addressed to that
+exact agent. The source link remains editable composer content. Opening sends
+nothing and does not create the chat; only Enter or Send does. Closing the panel
+keeps the draft, and a started chat remains in the ordinary Solo inventory.
+Reopening the same source resumes it. **Start Solo chat** remains available
+beside it; when no eligible Bestie is available, only the ordinary action shows.
+
 Source permissions still apply when an agent follows the ordinary link; seeing a
 link does not mean it can read or post in that source. Rendered, live
 cross-account, restart and real-agent acceptance remain separate from focused

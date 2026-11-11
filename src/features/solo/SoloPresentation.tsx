@@ -10,20 +10,54 @@ import styles from "./Solo.module.css";
 export function SoloDraftView({
   children,
   actions,
+  title = "New chat",
+  icon,
 }: {
   actions?: ReactNode;
+  title?: string;
+  icon?: ReactNode;
   children: ReactNode;
+}) {
+  return (
+    <SoloConversationView
+      title={title}
+      icon={icon}
+      actions={actions}
+      attachmentDropZone
+    >
+      <div className={styles.start}>
+        <div className={styles.startContent}>{children}</div>
+      </div>
+    </SoloConversationView>
+  );
+}
+
+/** Shared Solo frame for a draft or started conversation in any host pane. */
+export function SoloConversationView({
+  children,
+  actions,
+  title,
+  ariaLabel = title,
+  icon,
+  attachmentDropZone = false,
+}: {
+  actions?: ReactNode;
+  title: string;
+  ariaLabel?: string;
+  icon?: ReactNode;
+  children: ReactNode;
+  attachmentDropZone?: boolean;
 }) {
   return (
     <section
       className={styles.work}
-      data-attachment-drop-zone=""
-      aria-label="New chat"
+      {...(attachmentDropZone ? { "data-attachment-drop-zone": "" } : {})}
+      aria-label={ariaLabel}
     >
-      <SoloTitle channel={{ name: "New chat" }}>{actions}</SoloTitle>
-      <div className={styles.start}>
-        <div className={styles.startContent}>{children}</div>
-      </div>
+      <SoloTitle channel={{ name: title }} icon={icon}>
+        {actions}
+      </SoloTitle>
+      {children}
     </section>
   );
 }
@@ -49,15 +83,19 @@ export function SoloColumn({
 export function SoloTitle({
   channel,
   children,
+  icon,
 }: {
   channel: Pick<ChannelSummary, "name">;
   children?: ReactNode;
+  icon?: ReactNode;
 }) {
-  const Icon = ChatCircleIcon;
   return (
     <PanelHeader
       title={
-        <PanelHeaderLabel title={channel.name} icon={<Icon size="1rem" />} />
+        <PanelHeaderLabel
+          title={channel.name}
+          icon={icon ?? <ChatCircleIcon size="1rem" />}
+        />
       }
       actions={children}
     />

@@ -262,3 +262,20 @@ open Bestie to choose another.
 
 Builderlab no longer owns a separate Bestie setup, agent, Solo chat, or
 selection path.
+
+### Contextual asks
+
+With an eligible saved Bestie, a channel message's menu shows **Ask {Bestie
+name}** beside **Start Solo chat**, using that agent's current name and avatar.
+It opens the existing Channels side panel with an ordinary linked Solo draft
+addressed to that exact agent. The source message link is visible and editable
+in the shared composer; opening the panel creates no channel, sends no message,
+and wakes no agent. Enter or Send performs the ordinary first send.
+
+The source message stays in the main pane. Close or Escape removes only the
+panel presentation: its draft remains device-local, and a created chat remains
+in Solo. Opening the same source resumes the deterministic draft or created
+chat; another source gets another linked draft. Removing or changing Bestie,
+changing community/account, or disabling the plugin retires the panel. If no
+eligible saved Bestie is available, the Ask action is absent and the ordinary
+**Start Solo chat** action remains.

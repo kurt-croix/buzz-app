@@ -17,7 +17,13 @@ import {
   parseChatSetup,
   type ChatSetup,
 } from "./workspace";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type { RelaySession } from "../relay/session";
 import { ownedSoloAgents } from "../relay/solo-admins";
 import {
@@ -202,6 +208,9 @@ export function SoloDraft({
   visit,
   region,
   draft: regionDraft,
+  title = "New chat",
+  icon,
+  headerActions,
 }: {
   draft?: SoloDraftStart["draft"];
   /** The Solo region whose source opened this draft; its chat gets that label. */
@@ -225,6 +234,10 @@ export function SoloDraft({
     | ((id: string, message: string, retry?: () => Promise<void>) => void)
     | undefined;
   projectId?: string | undefined;
+  /** Optional host presentation; draft behavior and ownership stay unchanged. */
+  title?: string | undefined;
+  icon?: ReactNode;
+  headerActions?: ReactNode;
 }) {
   const draftKey = region
     ? regionDraftKey(region, projectId, regionDraft?.key)
@@ -931,19 +944,24 @@ export function SoloDraft({
   );
   return (
     <SoloDraftView
+      title={title}
+      icon={icon}
       actions={
-        <IconButton
-          ref={settingsTrigger}
-          size="toolbar"
-          aria-label="Chat settings"
-          title="Chat settings"
-          icon={<GearIcon size="1rem" aria-hidden="true" />}
-          disabled={busy}
-          onClick={() => {
-            setSettingsLifetime(draftLifetime(scope, draftSettings));
-            setSettingsOpen(true);
-          }}
-        />
+        <>
+          <IconButton
+            ref={settingsTrigger}
+            size="toolbar"
+            aria-label="Chat settings"
+            title="Chat settings"
+            icon={<GearIcon size="1rem" aria-hidden="true" />}
+            disabled={busy}
+            onClick={() => {
+              setSettingsLifetime(draftLifetime(scope, draftSettings));
+              setSettingsOpen(true);
+            }}
+          />
+          {headerActions}
+        </>
       }
     >
       {composer}
