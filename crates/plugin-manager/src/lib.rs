@@ -428,6 +428,18 @@ fn agents_manifest(gateway: &str) -> Manifest {
     }
     agents
 }
+/// A plugin an organization bundles into its own build: `src/bundled/org.json`,
+/// which packagers may replace with `src/bundled/org.ts`. Empty in OSS builds.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct OrgPlugin {
+    manifest: Manifest,
+    enabled_by_default: bool,
+}
+fn org_plugins() -> Vec<OrgPlugin> {
+    serde_json::from_str(include_str!("../../../src/bundled/org.json"))
+        .expect("organization plugins")
+}
 pub fn bundled_manifests() -> Vec<Manifest> {
     let mut builderlab: Manifest = serde_json::from_str(include_str!(
         "../../../src/bundled/builderlab/manifest.json"
@@ -459,7 +471,7 @@ pub fn bundled_manifests() -> Vec<Manifest> {
             ..HostGrants::default()
         }
     });
-    vec![
+    let mut manifests = vec![
         serde_json::from_str(include_str!(
             "../../../src/bundled/mesh-compute/manifest.json"
         ))
@@ -556,7 +568,9 @@ pub fn bundled_manifests() -> Vec<Manifest> {
             "../../../src/bundled/changesets/manifest.json"
         ))
         .expect("changesets manifest"),
-    ]
+    ];
+    manifests.extend(org_plugins().into_iter().map(|plugin| plugin.manifest));
+    manifests
 }
 /// New bundles must opt in to the default-on policy.
 fn enabled_by_default(id: &str) -> bool {
@@ -588,7 +602,9 @@ fn enabled_by_default(id: &str) -> bool {
             | "buzz.relay-staff"
             | "buzz.typesafe"
             | "buzz.plugin-development"
-    )
+    ) || org_plugins()
+        .iter()
+        .any(|plugin| plugin.manifest.id == id && plugin.enabled_by_default)
 }
 /// Bundled ids that older profiles may still hold as installed plugins.
 const FORMERLY_INSTALLED: &[&str] = &["buzz.claude-code", "buzz.codex"];
@@ -1814,6 +1830,10 @@ mod tests {
                 fs::read_to_string(format!("{root}/{}/manifest.json", dirs[name])).unwrap();
             let manifest: Manifest = serde_json::from_str(&manifest).unwrap();
             expected.insert(manifest.id, default);
+        }
+        // `...orgPlugins` adds org.json's, which org.ts gives code.
+        for plugin in super::org_plugins() {
+            expected.insert(plugin.manifest.id, plugin.enabled_by_default);
         }
         let native: BTreeMap<String, bool> = bundled_manifests()
             .into_iter()
