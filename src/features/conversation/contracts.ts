@@ -259,10 +259,12 @@ export type MessageAction = Readonly<{
   title: string;
   icon?: ComponentType;
   matches(message: ChannelMessage, session: RelaySession): boolean;
-  /** `menu` mounts inside the menu. `toolbar` uses a host icon button.
-   * Without a placement, the host adds a menu entry that opens the component. */
-  placement?: "menu" | "toolbar";
-  /** Mounted on activation, or inside the menu for `menu`; call close() to dismiss. */
+  /** `menu` mounts inside the menu. `menu-start` mounts there before the
+   * host's built-in actions. `toolbar` uses a host icon button. Without a
+   * placement, the host adds a menu entry that opens the component. */
+  placement?: "menu-start" | "menu" | "toolbar";
+  /** Mounted on activation, or inside the menu for `menu` / `menu-start`;
+   * call close() to dismiss. */
   component: ComponentType<
     TargetOpener & {
       message: ChannelMessage;

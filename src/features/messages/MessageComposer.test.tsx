@@ -8802,6 +8802,34 @@ it("keeps retry submission available while a new Solo draft is locked", () => {
   expect(h.messages.send).not.toHaveBeenCalled();
 });
 
+it("submits one seeded host request after its composer is ready", async () => {
+  const submit = vi.fn();
+  const h = mount({
+    submitRequest: "catch-up:one",
+    submission: {
+      draftKey: "catch-up",
+      initialDraft: "What’s new here that I need to know about?",
+      locked: false,
+      disabled: false,
+      submit,
+    },
+  });
+  await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+  h.retarget({ submitRequest: "catch-up:one" });
+  expect(submit).toHaveBeenCalledOnce();
+  expect(submit).toHaveBeenCalledWith(
+    {
+      text: "What’s new here that I need to know about?",
+      recipients: [],
+    },
+    expect.objectContaining({ prepareForSend: expect.any(Function) }),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+  );
+});
+
 it.each([undefined, "root"])(
   "prefills only exact selected agents after an accepted send in %s",
   (threadRootId) => {

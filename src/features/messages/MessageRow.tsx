@@ -650,11 +650,18 @@ function MessageRowContent({
       // A failed matcher makes this action unavailable.
     }
   };
-  const actionItems = (contextMenu: boolean) =>
+  const actionItems = (contextMenu: boolean, start = false) =>
     actions
-      .filter((action) => action.placement !== "toolbar" || contextMenu)
+      .filter((action) =>
+        start
+          ? action.placement === "menu-start"
+          : action.placement !== "menu-start" &&
+            (action.placement !== "toolbar" || contextMenu),
+      )
       .map((action) =>
-        action.placement === "menu" && session && extensions?.actions ? (
+        (action.placement === "menu" || action.placement === "menu-start") &&
+        session &&
+        extensions?.actions ? (
           <ContributionBoundary key={contributionKey(action)} fallback={null}>
             {/* A list's shared menu renders this outside the row's provider. */}
             <TargetOpenerProvider canOpen={canOpenLink} open={openLink}>
@@ -1261,9 +1268,12 @@ function MessageRowContent({
         </>
       }
       leadingItems={
-        session ? (
-          <MessageReadStateItem row={row} session={session} />
-        ) : undefined
+        <>
+          {actionItems(!!target, true)}
+          {session ? (
+            <MessageReadStateItem row={row} session={session} />
+          ) : undefined}
+        </>
       }
       overflowItems={
         <>

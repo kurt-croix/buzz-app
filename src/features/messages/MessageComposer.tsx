@@ -368,6 +368,8 @@ export type MessageComposerProps = {
   /** Focus once on entry; an owner can cancel its target before a delayed mount. */
   autoFocus?: boolean | RefObject<HTMLElement | null>;
   focusRequest?: number;
+  /** Submit one already-seeded, host-owned draft after its composer is ready. */
+  submitRequest?: string | undefined;
   hideMediaTimeIndicator?: boolean;
   disabled?: boolean;
   /** A new conversation owns persistence and delivery before a channel exists. */
@@ -551,6 +553,7 @@ function Composer({
   clearMediaTime,
   autoFocus = false,
   focusRequest,
+  submitRequest,
   hideMediaTimeIndicator = false,
   disabled: requestedDisabled = false,
   submission,
@@ -3416,6 +3419,38 @@ function Composer({
     }
   }
   const readingOnly = !outbox?.supports(9) && !cached;
+  const submittedRequest = useRef<string>(undefined);
+  useEffect(() => {
+    if (
+      !submitRequest ||
+      submittedRequest.current === submitRequest ||
+      readingOnly ||
+      editingDisabled ||
+      pickReadPending ||
+      pickReadFailed ||
+      !picksLoaded ||
+      sendPending ||
+      accepted ||
+      conflict ||
+      !value.text.trim() ||
+      (needsRecipient && !value.recipients.length)
+    )
+      return;
+    submittedRequest.current = submitRequest;
+    form.current?.requestSubmit();
+  }, [
+    submitRequest,
+    readingOnly,
+    editingDisabled,
+    pickReadPending,
+    pickReadFailed,
+    picksLoaded,
+    sendPending,
+    accepted,
+    conflict,
+    value,
+    needsRecipient,
+  ]);
   // The attachments section animates out over 150 ms; the form's gap and
   // padding (data-attachments) collapse when it has, not when the list empties.
   // An edit unmounts the section at once, so no exit completes during one.

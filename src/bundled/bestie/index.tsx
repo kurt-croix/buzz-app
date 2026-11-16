@@ -7,6 +7,7 @@ import type { ConversationExtensions } from "../../features/conversation/contrac
 import type { ConversationHostServices } from "../../features/conversation/ConversationHost";
 import type { Agents } from "../../features/agents/service";
 import type { RelayData } from "../../features/relay/service";
+import type { SidebarRowMenuProps } from "../../features/channel-navigation/sidebar-rows-service";
 import { useRelayConnection } from "../../features/relay/react";
 import { BestieIcon } from "../../shared/design-system/icons";
 import { Button } from "../../shared/design-system/ui/Button";
@@ -29,7 +30,11 @@ import {
 import { canStartLinkedChat } from "../channels/StartLinkedChat";
 import {
   AskBestieAction,
+  CatchUpBestieAction,
+  CatchUpRequestMessage,
   ContextualAskPanel,
+  catchUpRequestSummary,
+  parseContextualCatchUpTarget,
   parseContextualAskTarget,
 } from "./ContextualAsk";
 
@@ -62,20 +67,41 @@ export const apply: PluginModule["apply"] = (ctx) => {
       );
     }),
   );
+  ctx.conversation.registerMessage({
+    id: "catch-up-request",
+    title: "Bestie catch-up request",
+    matches: (message) =>
+      message.authorId === ctx.relay.snapshot().viewer &&
+      message.mentions.length === 1 &&
+      !!catchUpRequestSummary(message.content),
+    component: CatchUpRequestMessage,
+  });
   ctx.conversation.registerMessageAction({
     id: "ask-bestie",
-    title: "Ask Bestie",
-    placement: "menu",
+    title: "Catch up with Bestie",
+    placement: "menu-start",
     matches: (message, session) =>
+      (!!message.threadRootId || message.replyCount > 0) &&
       canStartLinkedChat(session, message.channelId) &&
       (!message.delivery || ["accepted", "seen"].includes(message.delivery)),
     component: AskBestieAction,
   });
+  ctx.reflect.get("sidebarRows")?.register({
+    version: 1,
+    id: "catch-up",
+    menu: (props: SidebarRowMenuProps) => (
+      <CatchUpBestieAction {...props} relay={ctx.relay} panels={ctx.panels} />
+    ),
+  });
   ctx.panels.register({
     id: "contextual-ask",
     title: "Bestie chat",
-    matches: (target) => !!parseContextualAskTarget(target),
+    matches: (target) =>
+      !!(
+        parseContextualAskTarget(target) || parseContextualCatchUpTarget(target)
+      ),
     channelPlacement: "side",
+    keepOpen: true,
     component: (props) => (
       <ContextualAskPanel
         {...props}

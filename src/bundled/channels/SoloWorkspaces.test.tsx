@@ -50,12 +50,17 @@ function projectOf(heading: HTMLElement) {
   if (!project) throw new Error("Missing project");
   return project;
 }
-function fixture(projectName = "Work") {
+function fixture(
+  projectName = "Work",
+  sections: SidebarPreferences["sections"] = [
+    { id: "work", name: projectName, order: 0 },
+  ],
+) {
   const owner = createRelaySession(null);
   const details = { ...owner.session.channelDetails };
   owners.push(owner);
   let saved: SidebarPreferences = {
-    sections: [{ id: "work", name: projectName, order: 0 }],
+    sections,
     assignments: {},
     starred: [],
     muted: [],
@@ -235,6 +240,28 @@ it("moves workspaces with the section menu, keeps collapse and filing, and retri
   expect(h.write).not.toHaveBeenCalled();
   mounted.unmount();
   first.dispose();
+});
+
+it("labels and places the generated catch-up workspace after Chats", async () => {
+  const h = fixture("Work", [
+    { id: "work", name: "Work", order: 0 },
+    { id: "bestie-catch-ups", name: "Catch-ups", order: 1 },
+  ]);
+  const store = h.store();
+  render(h.view(store.queries));
+  try {
+    const work = await screen.findByRole("button", { name: "Work" });
+    const chats = screen.getByRole("button", { name: "Chats" });
+    const catchUp = screen.getByRole("button", { name: "Catch me up" });
+    expect(
+      work.compareDocumentPosition(chats) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      chats.compareDocumentPosition(catchUp) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  } finally {
+    store.dispose();
+  }
 });
 
 it("creates and moves through the relay service, then restores in a fresh store", async () => {

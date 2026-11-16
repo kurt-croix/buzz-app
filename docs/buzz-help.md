@@ -1461,14 +1461,24 @@ available rather than silently discarding it.
   it doesn't turn on **Remembers you** with the **Bestie** plugin on; turn that
   on in the agent's **Bestie** tab. While an agent's change is saving, **Make
   my bestie** and **Remove as bestie** ask you to try again.
-- With an eligible saved Bestie, open a channel message's menu and choose
-  **Ask {Bestie name}** beside **Start Solo chat**. It uses the saved Bestie's
-  name and avatar, and opens an ordinary private Solo draft in the existing
-  right panel while the source conversation stays in the main pane. The source
-  link is visible and editable. Nothing is sent and the agent is not woken until
-  you press Enter or Send. Closing the panel keeps the draft; after sending, the
-  chat remains in Solo. Reopening the same source resumes it. If no eligible
-  Bestie is available, the Ask action is absent and the ordinary action remains.
+- With an eligible saved Bestie, open the menu on a thread root or any reply and
+  choose **Catch me up** beside **Start Solo chat**. Buzz resolves replies to the
+  thread root, asks Bestie to read the root and all replies, and sends the
+  request automatically in the right panel without moving the source chat.
+- Right-click an eligible channel in the left navigation and choose
+  **Catch me up**. Unread channels use a fixed first-unread-to-latest range;
+  otherwise, channels active in the last two days use that fixed window. Quiet
+  channels omit the action. The source channel stays unopened and unread.
+  Distinct catch-ups remain as closable right-panel tabs and become ordinary
+  Solo chats with source-and-date titles in the **Catch me up** workspace at
+  the bottom of Solo, after **Chats**. Buzz keeps the generated request compact
+  in the chat; choose **Show request** to read its full source range and
+  instructions. When the known private-channel roster does not include Bestie,
+  it responds with the access guidance directly. Otherwise it checks access
+  before any optional progress update. Progress updates use **Taking a look
+  now. I’ll let you know what I find.** If Bestie cannot read the source, it
+  asks to be added to the channel or for the messages to be pasted into the
+  Solo chat.
 - With the **Bestie** plugin on, open **Create an agent** in the left navigation
   when you haven’t chosen a Bestie. You can create one or choose an existing agent.
   The placeholder cycles through character avatars; reduced motion keeps it still.

@@ -343,6 +343,12 @@ test("the app runtime exposes ready bundled pages and removes them on disable", 
         .some((panel) => panel.pluginId === "buzz.bestie"),
       true,
     );
+    assert.equal(
+      services.panels
+        .snapshot()
+        .find((panel) => panel.pluginId === "buzz.bestie")?.keepOpen,
+      true,
+    );
     assert.deepEqual(
       services.conversation.actions
         .snapshot()
