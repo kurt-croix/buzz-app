@@ -32,6 +32,7 @@ import {
   catchUpRequestSummary,
   contextualAskTarget,
   contextualCatchUpTarget,
+  fileCatchUpChat,
   parseContextualAskTarget,
   parseContextualCatchUpTarget,
 } from "./ContextualAsk";
@@ -415,6 +416,8 @@ it("offers Catch me up only in the left-nav row and captures its unread cut befo
   expect(readView(scope, `${key}:submit-request`, null)).toBe(opening?.target);
   expect(readView(scope, `${key}:settings`, null)).toEqual({
     name: "Launch [planning] · Nov 11",
+    ttlSeconds: 604800,
+    lifetimeChosen: true,
   });
   expect(close).toHaveBeenCalledOnce();
   expect(markChannelRead).not.toHaveBeenCalled();
@@ -544,6 +547,8 @@ it("offers the exact saved Bestie and seeds an automatic whole-thread catch-up",
   );
   expect(readView(scope, `${key}:settings`, null)).toEqual({
     name: "Launch plan · Nov 11",
+    ttlSeconds: 604800,
+    lifetimeChosen: true,
   });
   expect(thread).toHaveBeenCalledWith("design", message.id);
   expect(dispose).toHaveBeenCalledOnce();
@@ -607,11 +612,15 @@ it("replaces the fallback panel title with the seeded catch-up topic", async () 
     await screen.findByRole("tab", { name: "Launch plan · Nov 11" }),
   ).toBeInTheDocument();
   expect(screen.queryByRole("tab", { name: "Bestie chat" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Close chat with Pollen" }),
+  ).toBeNull();
+  expect(document.querySelectorAll("header.panel-header")).toHaveLength(1);
 });
 
 it.each([
   {
-    label: "creates Catch me up on the first catch-up chat",
+    label: "creates Catch me up when the catch-up chat starts",
     sections: [],
     expected: "create",
   },
@@ -633,26 +642,8 @@ it.each([
     expected: "assign",
     thread: false,
   },
-])("$label", async ({ sections, expected, thread = false }) => {
+])("$label", async ({ sections, expected }) => {
   const channelId = crypto.randomUUID();
-  const oldest = "d".repeat(64);
-  const latest = "e".repeat(64);
-  const target = contextualCatchUpTarget(
-    thread
-      ? { thread: oldest, agent: "b".repeat(64) }
-      : {
-          channel: "design",
-          oldest,
-          latest,
-          agent: "b".repeat(64),
-        },
-  );
-  const sourceId = thread ? oldest : `catch-up:design:${oldest}:${latest}`;
-  writeView(
-    scope,
-    `${contextualDraftKey(sourceId, "b".repeat(64))}:started-chat`,
-    channelId,
-  );
   const ensure = vi.fn(async () => {});
   const data = {
     sections: sections.map((section, order) => ({ ...section, order })),
@@ -665,18 +656,73 @@ it.each([
   const renameSection = vi.fn(async () => {
     throw new Error("Section rename is unavailable");
   });
+  const preferencesSnapshot = {
+    status: "ready" as const,
+    data,
+  };
   const catchUpSession = {
     ...session,
     soloPreferences: {
       ...session.soloPreferences,
       ensure,
-      snapshot: () => ({
-        status: "ready" as const,
-        data,
-      }),
+      snapshot: () => preferencesSnapshot,
       createAndAssign,
       assign,
       renameSection,
+    },
+  } as unknown as RelaySession;
+  await fileCatchUpChat(catchUpSession, channelId);
+  if (expected === "create")
+    expect(createAndAssign).toHaveBeenCalledWith(channelId, {
+      id: "bestie-catch-ups",
+      name: "Catch me up",
+    });
+  else expect(assign).toHaveBeenCalledWith(channelId, "existing");
+  expect(renameSection).not.toHaveBeenCalled();
+  expect(ensure).toHaveBeenCalledOnce();
+});
+
+it("does not move an existing catch-up back after the owner re-files it", async () => {
+  const channelId = crypto.randomUUID();
+  const sourceId = message.id;
+  const key = contextualDraftKey(sourceId, "b".repeat(64));
+  writeView(scope, `${key}:started-chat`, channelId);
+  writeView(scope, `${key}:source`, {
+    channelId: message.channelId,
+    link: `buzz://message?channel=${message.channelId}&id=${message.id}`,
+  });
+  const ensure = vi.fn(async () => {});
+  const assign = vi.fn(async () => {});
+  const createAndAssign = vi.fn(async () => {});
+  const loadingChannels = {
+    status: "loading" as const,
+    channels: [],
+  };
+  const preferencesSnapshot = {
+    status: "ready" as const,
+    data: {
+      sections: [
+        { id: "catch-ups", name: "Catch me up", order: 0 },
+        { id: "mine", name: "My workspace", order: 1 },
+      ],
+      assignments: { [channelId]: "mine" },
+      starred: [],
+      muted: [],
+    },
+  };
+  const catchUpSession = {
+    ...session,
+    channels: {
+      ...session.channels,
+      list: () => loadingChannels,
+      subscribeList: () => () => {},
+    },
+    soloPreferences: {
+      ...session.soloPreferences,
+      ensure,
+      snapshot: () => preferencesSnapshot,
+      assign,
+      createAndAssign,
     },
   } as unknown as RelaySession;
   const relaySnapshot = {
@@ -700,7 +746,10 @@ it.each([
   render(
     <ToastProvider>
       <ContextualAskPanel
-        target={target}
+        target={contextualCatchUpTarget({
+          thread: sourceId,
+          agent: "b".repeat(64),
+        })}
         close={() => {}}
         relay={relay}
         host={{} as never}
@@ -708,19 +757,84 @@ it.each([
       />
     </ToastProvider>,
   );
-  if (expected === "create")
-    await waitFor(() =>
-      expect(createAndAssign).toHaveBeenCalledWith(channelId, {
-        id: "bestie-catch-ups",
-        name: "Catch me up",
-      }),
-    );
-  else
-    await waitFor(() =>
-      expect(assign).toHaveBeenCalledWith(channelId, "existing"),
-    );
-  expect(renameSection).not.toHaveBeenCalled();
-  expect(ensure).toHaveBeenCalledOnce();
+  expect(await screen.findByText("Opening your chat…")).toBeInTheDocument();
+  expect(ensure).not.toHaveBeenCalled();
+  expect(assign).not.toHaveBeenCalled();
+  expect(createAndAssign).not.toHaveBeenCalled();
+});
+
+it.each([
+  { label: "deleted", archived: false },
+  { label: "archived", archived: true },
+])("restarts a catch-up whose saved chat was $label", async ({ archived }) => {
+  const channelId = crypto.randomUUID();
+  const sourceId = message.id;
+  const key = contextualDraftKey(sourceId, "b".repeat(64));
+  const startedKey = `${key}:started-chat`;
+  writeView(scope, startedKey, channelId);
+  writeView(scope, `${key}:source`, {
+    channelId: message.channelId,
+    link: `buzz://message?channel=${message.channelId}&id=${message.id}`,
+  });
+  const channelSnapshot = {
+    status: "ready" as const,
+    channels: archived
+      ? [
+          {
+            id: channelId,
+            name: "Old catch-up",
+            channelType: "solo" as const,
+            members: [viewer, "b".repeat(64)],
+            archived: true,
+          },
+        ]
+      : [],
+  };
+  const catchUpSession = {
+    ...session,
+    channels: {
+      ...session.channels,
+      list: () => channelSnapshot,
+      subscribeList: () => () => {},
+    },
+  } as unknown as RelaySession;
+  const relaySnapshot = {
+    status: "ready" as const,
+    generation: 1,
+    scope,
+    origin: "https://relay.test",
+    viewer,
+    session: catchUpSession,
+  };
+  const relay = {
+    snapshot: () => relaySnapshot,
+    subscribe: () => () => {},
+    retry() {},
+    tryAgain() {},
+    disconnect() {},
+    clearCache: async () => {},
+  } satisfies RelayData;
+  const none: readonly never[] = [];
+  const contributions = { snapshot: () => none, subscribe: () => () => {} };
+  render(
+    <ToastProvider>
+      <ContextualAskPanel
+        target={contextualCatchUpTarget({
+          thread: sourceId,
+          agent: "b".repeat(64),
+        })}
+        close={() => {}}
+        relay={relay}
+        host={{} as never}
+        extensions={{ tools: contributions, inline: contributions }}
+      />
+    </ToastProvider>,
+  );
+  expect(
+    await screen.findByRole("form", { name: "Send a message to this chat" }),
+  ).toBeInTheDocument();
+  expect(readView(scope, startedKey, null)).toBeNull();
+  expect(screen.queryByText("Opening your chat…")).toBeNull();
 });
 
 it("does not resume a former Bestie's chat for the same source", async () => {
@@ -836,8 +950,8 @@ it("presents the linked source as an editable unsent draft in the side panel", a
   );
   expect(screen.getByLabelText("Pollen")).toBeInTheDocument();
   expect(
-    screen.getByRole("button", { name: "Close chat with Pollen" }),
-  ).toBeInTheDocument();
+    screen.queryByRole("button", { name: "Close chat with Pollen" }),
+  ).toBeNull();
   const editor = await screen.findByRole("textbox");
   expect(editor).toHaveTextContent(link);
   expect(startChat).not.toHaveBeenCalled();

@@ -1473,7 +1473,13 @@ available rather than silently discarding it.
   Solo chats with source-and-date titles in the **Catch me up** workspace at
   the bottom of Solo, after **Chats**. Buzz keeps the generated request compact
   in the chat; choose **Show request** to read its full source range and
-  instructions. When the known private-channel roster does not include Bestie,
+  instructions. Reopening a thread catch-up shows its previous conversation;
+  choose **Update catch-up** to request a fresh summary in that same chat.
+  Updates preserve an existing draft or attachments and ask you to finish them
+  first. New catch-up chats archive after seven days without activity, regardless
+  of your general Solo default. Use **Chat settings** in the panel to choose
+  **Ongoing** or another lifetime. When the known private-channel roster does
+  not include Bestie,
   it responds with the access guidance directly. Otherwise it checks access
   before any optional progress update. Progress updates use **Taking a look
   now. I’ll let you know what I find.** If Bestie cannot read the source, it

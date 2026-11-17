@@ -149,6 +149,7 @@ import {
   MAX_DRAFT_GIFS,
   mentionBoundary,
   mentionDraft,
+  addressingOnly,
   stageableGif,
   type MentionDraft,
   type MentionRecipient,
@@ -369,7 +370,16 @@ export type MessageComposerProps = {
   autoFocus?: boolean | RefObject<HTMLElement | null>;
   focusRequest?: number;
   /** Submit one already-seeded, host-owned draft after its composer is ready. */
-  submitRequest?: string | undefined;
+  submitRequest?:
+    | string
+    | Readonly<{
+        id: string;
+        draft: MentionDraft;
+        /** A request never replaces a person's draft, files, or edit. */
+        onBlocked(): void;
+        onSubmitted?(): void;
+      }>
+    | undefined;
   hideMediaTimeIndicator?: boolean;
   disabled?: boolean;
   /** A new conversation owns persistence and delivery before a channel exists. */
@@ -3420,10 +3430,14 @@ function Composer({
   }
   const readingOnly = !outbox?.supports(9) && !cached;
   const submittedRequest = useRef<string>(undefined);
-  useEffect(() => {
+  const seededRequest = useRef<string>(undefined);
+  const submitHostRequest = useEffectEvent(() => {
+    const requestId =
+      typeof submitRequest === "string" ? submitRequest : submitRequest?.id;
     if (
-      !submitRequest ||
-      submittedRequest.current === submitRequest ||
+      !requestId ||
+      submittedRequest.current === requestId ||
+      value !== valueRef.current ||
       readingOnly ||
       editingDisabled ||
       pickReadPending ||
@@ -3431,26 +3445,48 @@ function Composer({
       !picksLoaded ||
       sendPending ||
       accepted ||
-      conflict ||
-      !value.text.trim() ||
-      (needsRecipient && !value.recipients.length)
+      conflict
     )
       return;
-    submittedRequest.current = submitRequest;
+    if (typeof submitRequest === "object") {
+      const blocked =
+        !!editing.target ||
+        attachments.items.length > 0 ||
+        !!value.chatCards?.length ||
+        !!value.gifs?.length ||
+        voice.isCapturing();
+      if (seededRequest.current !== requestId) {
+        if (
+          blocked ||
+          (composerMarkdown(value).trim() && !addressingOnly(value))
+        ) {
+          submittedRequest.current = requestId;
+          submitRequest.onBlocked();
+          return;
+        }
+        seededRequest.current = requestId;
+        saveDraft(submitRequest.draft);
+        input.current?.reset(submitRequest.draft);
+        return;
+      }
+      if (
+        blocked ||
+        value.text !== submitRequest.draft.text ||
+        JSON.stringify(value.recipients) !==
+          JSON.stringify(submitRequest.draft.recipients)
+      ) {
+        submittedRequest.current = requestId;
+        submitRequest.onBlocked();
+        return;
+      }
+    }
+    if (!value.text.trim() || (needsRecipient && !value.recipients.length))
+      return;
+    submittedRequest.current = requestId;
     form.current?.requestSubmit();
-  }, [
-    submitRequest,
-    readingOnly,
-    editingDisabled,
-    pickReadPending,
-    pickReadFailed,
-    picksLoaded,
-    sendPending,
-    accepted,
-    conflict,
-    value,
-    needsRecipient,
-  ]);
+    if (typeof submitRequest === "object") submitRequest.onSubmitted?.();
+  });
+  useEffect(() => submitHostRequest());
   // The attachments section animates out over 150 ms; the form's gap and
   // padding (data-attachments) collapse when it has, not when the list empties.
   // An edit unmounts the section at once, so no exit completes during one.

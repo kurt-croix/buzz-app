@@ -43,7 +43,6 @@ import {
   summary,
 } from "../relay/testing";
 import { ToastProvider } from "../../shared/design-system/ui/Toast";
-import { MenuItem } from "../../shared/design-system/ui/Menu";
 import { ConversationPresentation } from "../conversation/ConversationPresentation";
 import { MessageRow } from "./MessageRow";
 import { MessageContextMenus } from "./MessageActionBar";
@@ -2950,66 +2949,6 @@ it("contains a throwing plugin action icon and opened component", async () => {
     expect(screen.getByText("Root")).toBeInTheDocument();
   } finally {
     error.mockRestore();
-    cleanup();
-  }
-});
-
-it("places a menu-start contribution before the built-in message actions", async () => {
-  const actions = [
-    {
-      id: "catch-up",
-      title: "Catch me up",
-      key: "test.plugin/catch-up",
-      pluginId: "test.plugin",
-      revision: "one",
-      placement: "menu-start" as const,
-      matches: () => true,
-      component: () => <MenuItem>Catch me up</MenuItem>,
-    },
-  ];
-  const none: never[] = [];
-  const empty = { snapshot: () => none, subscribe: () => () => {} };
-  const channelList = { channels: [], status: "ready" };
-  const session = {
-    viewer: "viewer",
-    presence: {
-      subscribe: () => () => {},
-      status: () => "unknown",
-      limited: () => false,
-    },
-    unread: {
-      subscribe: () => () => {},
-      subscribeSync: () => () => {},
-      snapshot: () => undefined,
-      following: () => false,
-    },
-    messages: { report: undefined },
-    channels: { subscribeList: () => () => {}, list: () => channelList },
-  } as unknown as RelaySession;
-  try {
-    renderDom(
-      <MessageRow
-        row={{ ...row, replyCount: 0 }}
-        session={session}
-        profile={undefined}
-        media={() => undefined}
-        onOpenLink={() => false}
-        day={false}
-        retry={undefined}
-        extensions={{
-          tools: empty,
-          inline: empty,
-          actions: { snapshot: () => actions, subscribe: () => () => {} },
-        }}
-      />,
-    );
-    fireEvent.click(
-      screen.getByRole("button", { name: "More message actions" }),
-    );
-    expect(
-      (await screen.findAllByRole("menuitem")).map((item) => item.textContent),
-    ).toEqual(["Catch me up", "Copy message", "Copy link"]);
-  } finally {
     cleanup();
   }
 });

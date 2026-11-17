@@ -12,10 +12,12 @@ export function SoloDraftView({
   actions,
   title = "New chat",
   icon,
+  embedded,
 }: {
   actions?: ReactNode;
   title?: string;
   icon?: ReactNode;
+  embedded?: boolean | undefined;
   children: ReactNode;
 }) {
   return (
@@ -23,10 +25,16 @@ export function SoloDraftView({
       title={title}
       icon={icon}
       actions={actions}
+      embedded={embedded}
       attachmentDropZone
     >
       <div className={styles.start}>
-        <div className={styles.startContent}>{children}</div>
+        <div className={styles.startContent}>
+          {embedded && actions && (
+            <div className="flex justify-end px-3 py-2">{actions}</div>
+          )}
+          {children}
+        </div>
       </div>
     </SoloConversationView>
   );
@@ -40,6 +48,7 @@ export function SoloConversationView({
   ariaLabel = title,
   icon,
   attachmentDropZone = false,
+  embedded = false,
 }: {
   actions?: ReactNode;
   title: string;
@@ -47,6 +56,8 @@ export function SoloConversationView({
   icon?: ReactNode;
   children: ReactNode;
   attachmentDropZone?: boolean;
+  /** The mounting panel supplies its own header and close controls. */
+  embedded?: boolean | undefined;
 }) {
   return (
     <section
@@ -54,9 +65,11 @@ export function SoloConversationView({
       {...(attachmentDropZone ? { "data-attachment-drop-zone": "" } : {})}
       aria-label={ariaLabel}
     >
-      <SoloTitle channel={{ name: title }} icon={icon}>
-        {actions}
-      </SoloTitle>
+      {!embedded && (
+        <SoloTitle channel={{ name: title }} icon={icon}>
+          {actions}
+        </SoloTitle>
+      )}
       {children}
     </section>
   );

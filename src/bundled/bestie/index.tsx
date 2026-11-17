@@ -79,7 +79,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
   ctx.conversation.registerMessageAction({
     id: "ask-bestie",
     title: "Catch up with Bestie",
-    placement: "menu-start",
+    placement: "menu",
     matches: (message, session) =>
       (!!message.threadRootId || message.replyCount > 0) &&
       canStartLinkedChat(session, message.channelId) &&

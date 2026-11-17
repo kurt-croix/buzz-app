@@ -46,8 +46,13 @@ import {
 import { AgentPortrait } from "../agents/AgentCard";
 import { ChannelBody } from "../channels/ChannelBody";
 import { MenuIcon, MenuItem } from "../../shared/design-system/ui/Menu";
-import { IconButton } from "../../shared/design-system/ui/IconButton";
-import { XIcon } from "../../shared/design-system/icons";
+import { Button } from "../../shared/design-system/ui/Button";
+import { WorkspaceSettings } from "../../features/solo/WorkspaceSettings";
+import { canEditLifetime } from "../../features/solo/Lifetime";
+import { channelDurationLabel } from "../channels/ChannelDurationField";
+import { DEFAULT_TEMPORARY_CHANNEL_TTL_SECONDS } from "../../features/relay/channel-writes";
+import type { MessageComposerProps } from "../../features/messages/MessageComposer";
+import { useBackgroundSendPending } from "../../features/messages/background-upload";
 import { useToastNotification } from "../../shared/design-system/ui/Toast";
 import type { Panels } from "../../features/panels/service";
 import { usePanelTabTitle } from "../../features/panels/PanelWorkspace";
@@ -418,18 +423,17 @@ function seedContextualRequest(
   title: string,
 ) {
   const key = contextualDraftKey(sourceId, bestie.pubkey);
-  if (
-    typeof readView<unknown>(
-      scope,
-      startedChatKey(sourceId, bestie.pubkey),
-      null,
-    ) === "string"
-  )
-    return true;
+  // Keep the source available when an existing catch-up is reopened. Solo's
+  // first-send owner consumes its draft source after creating the chat.
+  if (!writeView(scope, `${key}:source`, source)) return false;
   if (
     writeView(scope, key, source) &&
     writeView(scope, `${key}:new-draft`, draft) &&
-    writeView(scope, `${key}:settings`, { name: title }) &&
+    writeView(scope, `${key}:settings`, {
+      name: title,
+      ttlSeconds: DEFAULT_TEMPORARY_CHANNEL_TTL_SECONDS,
+      lifetimeChosen: true,
+    }) &&
     writeView(scope, `${key}:submit-request`, requestTarget)
   )
     return true;
@@ -440,7 +444,10 @@ function seedContextualRequest(
   return false;
 }
 
-async function fileCatchUpChat(session: RelaySession, channelId: string) {
+export async function fileCatchUpChat(
+  session: RelaySession,
+  channelId: string,
+) {
   await session.soloPreferences.ensure();
   const snapshot = session.soloPreferences.snapshot();
   if (snapshot.status !== "ready" || !snapshot.data)
@@ -700,18 +707,6 @@ export function CatchUpBestieAction({
   );
 }
 
-function Close({ name, close }: { name: string; close(): void }) {
-  return (
-    <IconButton
-      size="toolbar"
-      aria-label={`Close chat with ${name}`}
-      title="Close chat"
-      onClick={close}
-      icon={<XIcon size="1rem" aria-hidden="true" />}
-    />
-  );
-}
-
 /** The current channel side-column host supplies the split, focus fence and
  * close behavior. This panel supplies only the ordinary linked Solo content. */
 export function ContextualAskPanel({
@@ -755,6 +750,12 @@ export function ContextualAskPanel({
     key: startedKey,
     value: startedKey ? readView<unknown>(scope, startedKey, null) : null,
   }));
+  const [updateRequest, setUpdateRequest] = useState<{
+    target: string;
+    request: MessageComposerProps["submitRequest"];
+  }>();
+  const [settingsOpen, setSettingsOpen] = useState<string>();
+  const settingsTrigger = useRef<HTMLButtonElement>(null);
   // Panel hosts may reuse this component for a new target. Never show the
   // previous source's chat for even one render while React resets local state.
   const started =
@@ -764,9 +765,18 @@ export function ContextualAskPanel({
         ? readView<unknown>(scope, startedKey, null)
         : null;
   const channelId = typeof started === "string" ? started : undefined;
+  const updating = useBackgroundSendPending(
+    session,
+    `${scope}:draft:${channelId ?? ""}`,
+  );
   const channel = channelId
     ? channels.channels.find((item) => item.id === channelId)
     : undefined;
+  const staleStartedChat = !!(
+    channelId &&
+    channels.status === "ready" &&
+    (!channel || channel.archived)
+  );
   const seededSettings = draftKey
     ? readView<unknown>(scope, `${draftKey}:settings`, null)
     : null;
@@ -791,20 +801,20 @@ export function ContextualAskPanel({
     [bestieName, bestiePicture, community],
   );
   usePanelTabTitle(channel?.name || seededTitle || "Bestie chat", icon);
-  const filing = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (!catchUp || !channelId || filing.current === channelId) return;
-    filing.current = channelId;
-    void fileCatchUpChat(session, channelId).catch((error: unknown) => {
-      filing.current = undefined;
+    if (!staleStartedChat || !startedKey || !channelId) return;
+    const savedChat = readView<unknown>(scope, startedKey, null);
+    if (savedChat !== channelId) {
+      setStartedState({ key: startedKey, value: savedChat });
+      return;
+    }
+    if (!writeView(scope, startedKey, null))
       notify(
-        `The chat started, but it couldn’t be filed in Catch me up. ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        "The old catch-up is unavailable, but its replacement could not be saved on this device.",
         "error",
       );
-    });
-  }, [catchUp, channelId, session, notify]);
+    setStartedState({ key: startedKey, value: null });
+  }, [staleStartedChat, startedKey, channelId, scope, notify]);
   // Starting a linked Solo consumes its saved source before its final local
   // cleanup calls onStarted. Keep this panel visit's source through that gap:
   // the optimistic channel-list update may otherwise rerender and unmount the
@@ -814,15 +824,28 @@ export function ContextualAskPanel({
       (listener) =>
         draftKey
           ? subscribeView(scope, (changedKey) => {
-              if (changedKey === undefined || changedKey === draftKey)
+              if (
+                changedKey === undefined ||
+                changedKey === draftKey ||
+                changedKey === `${draftKey}:source`
+              )
                 listener();
             })
           : () => {},
       [scope, draftKey],
     ),
-    () => (draftKey ? viewRevision(scope, draftKey) : undefined),
+    () =>
+      draftKey
+        ? JSON.stringify([
+            viewRevision(scope, draftKey),
+            viewRevision(scope, `${draftKey}:source`),
+          ])
+        : undefined,
   );
-  const savedSource = draftKey ? readLinkedChat(scope, draftKey) : undefined;
+  const savedSource = draftKey
+    ? (readLinkedChat(scope, draftKey) ??
+      readLinkedChat(scope, `${draftKey}:source`))
+    : undefined;
   const sourceState = useRef<{
     key: string | undefined;
     value: LinkedChat | undefined;
@@ -867,14 +890,26 @@ export function ContextualAskPanel({
 
   // The same source/date identity names the retained panel tab and the
   // ordinary Solo chat; the Bestie portrait remains its conversation identity.
-  const closeAction = <Close name={bestie.name} close={close} />;
+  if (staleStartedChat)
+    return (
+      <SoloConversationView
+        title={bestie.name}
+        ariaLabel={`Chat with ${bestie.name}`}
+        icon={icon}
+        embedded
+      >
+        <p role="status" className="m-0 p-4 text-body-sm text-subtle">
+          Starting a new catch-up…
+        </p>
+      </SoloConversationView>
+    );
   if (channelId && !channel)
     return (
       <SoloConversationView
         title={bestie.name}
         ariaLabel={`Chat with ${bestie.name}`}
         icon={icon}
-        actions={closeAction}
+        embedded
       >
         <p role="status" className="m-0 p-4 text-body-sm text-subtle">
           Opening your chat…
@@ -896,17 +931,85 @@ export function ContextualAskPanel({
             title={bestie.name}
             ariaLabel={`Chat with ${bestie.name}`}
             icon={icon}
-            actions={closeAction}
+            embedded
             attachmentDropZone
           >
             <SoloColumn>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
+                <p className="m-0 flex-1 text-caption text-subtle">
+                  With {bestie.name} ·{" "}
+                  {channel.ttlSeconds
+                    ? `Archives after ${channelDurationLabel(channel.ttlSeconds)} of inactivity`
+                    : "Ongoing"}
+                </p>
+                {catchUp && "thread" in catchUp && source && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={
+                      updateRequest?.target === `${scope}:${target}` ||
+                      updating ||
+                      !!channel.archived ||
+                      !!channel.readOnly ||
+                      !!channel.cached
+                    }
+                    onClick={() => {
+                      setUpdateRequest({
+                        target: `${scope}:${target}`,
+                        request: {
+                          id: crypto.randomUUID(),
+                          draft: threadCatchUpDraft(source, bestie),
+                          onSubmitted: () => setUpdateRequest(undefined),
+                          onBlocked: () => {
+                            setUpdateRequest(undefined);
+                            notify(
+                              "Send or clear your draft and finish any edit or recording before updating the catch-up.",
+                              "info",
+                            );
+                          },
+                        },
+                      });
+                    }}
+                  >
+                    Update catch-up
+                  </Button>
+                )}
+                {canEditLifetime(session, channel) && (
+                  <Button
+                    ref={settingsTrigger}
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setSettingsOpen(`${scope}:${target}`)}
+                  >
+                    Chat settings
+                  </Button>
+                )}
+              </div>
               <ChannelBody
                 cached={!!channel.cached}
                 viewer={session.viewer}
                 marksRead
               />
-              <ConversationComposer autoFocus />
+              <ConversationComposer
+                autoFocus
+                submitRequest={
+                  updateRequest?.target === `${scope}:${target}`
+                    ? updateRequest.request
+                    : undefined
+                }
+                onSend={() => setUpdateRequest(undefined)}
+              />
             </SoloColumn>
+            {settingsOpen === `${scope}:${target}` && (
+              <WorkspaceSettings
+                key={channel.id}
+                session={session}
+                scope={scope}
+                target={{ kind: "chat", id: channel.id, name: channel.name }}
+                finalFocus={settingsTrigger}
+                close={() => setSettingsOpen(undefined)}
+              />
+            )}
           </SoloConversationView>
         </ConversationChannel>
       </ConversationPresentation>
@@ -917,7 +1020,7 @@ export function ContextualAskPanel({
         title={bestie.name}
         ariaLabel={`Chat with ${bestie.name}`}
         icon={icon}
-        actions={closeAction}
+        embedded
       >
         <p role="alert" className="m-0 p-4 text-body-sm text-danger">
           This chat draft is unavailable. Start again from its source.
@@ -934,7 +1037,7 @@ export function ContextualAskPanel({
       extensions={extensions}
       title={bestie.name}
       icon={icon}
-      headerActions={closeAction}
+      embedded
       focusRequest={1}
       submitRequest={
         typeof seededSubmitRequest === "string" &&
@@ -950,6 +1053,15 @@ export function ContextualAskPanel({
             "error",
           );
         setStartedState({ key: startedKey, value: id });
+        if (catchUp)
+          void fileCatchUpChat(session, id).catch((error: unknown) => {
+            notify(
+              `The chat started, but it couldn’t be filed in Catch me up. ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+              "error",
+            );
+          });
       }}
       onFailed={(id, message, retry) => {
         if (startedKey && readView<unknown>(scope, startedKey, null) === id)

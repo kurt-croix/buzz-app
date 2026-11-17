@@ -290,3 +290,10 @@ for the messages to be pasted into the Solo chat.
 Removing or changing Bestie, changing community/account, or disabling the plugin
 retires the panel. If no eligible saved Bestie is available, the catch-up action
 is absent and **Start Solo chat** remains.
+
+Catch-up chats explicitly start with a seven-day inactivity lifetime, independent
+of the general new-Solo default. The panel shows the current lifetime and opens
+the existing Chat settings dialog to change it. Reopening a thread catch-up
+returns to its conversation; **Update catch-up** explicitly requests another
+summary through its ordinary composer, preserving any existing draft or files.
+The panel host supplies the only header and close controls.

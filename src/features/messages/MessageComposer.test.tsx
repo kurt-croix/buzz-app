@@ -8830,6 +8830,129 @@ it("submits one seeded host request after its composer is ready", async () => {
   );
 });
 
+it("seeds an explicit update into an empty composer and submits it once", async () => {
+  const submit = vi.fn();
+  const onBlocked = vi.fn();
+  const onSubmitted = vi.fn();
+  const request = {
+    id: "update:one",
+    draft: { text: "Read the thread again and catch me up", recipients: [] },
+    onBlocked,
+    onSubmitted,
+  };
+  const h = mount({
+    submission: {
+      draftKey: "catch-up:update",
+      initialDraft: "",
+      locked: false,
+      disabled: false,
+      submit,
+    },
+  });
+  h.retarget({ submitRequest: request });
+  await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+  expect(submit.mock.calls[0]?.[0]).toMatchObject(request.draft);
+  h.retarget({ submitRequest: request });
+  expect(submit).toHaveBeenCalledOnce();
+  expect(onBlocked).not.toHaveBeenCalled();
+  expect(onSubmitted).toHaveBeenCalledOnce();
+});
+
+it("sends an explicit catch-up update to its selected agent in the existing Solo chat", async () => {
+  const h = mount();
+  h.setLibrary([first]);
+  const channel = {
+    id: "channel",
+    name: "Catch-up chat",
+    channelType: "solo" as const,
+    members: [first.pubkey],
+  };
+  const list = { status: "ready" as const, channels: [channel] };
+  h.retarget({
+    ownSoloConversation: true,
+    soloConversation: true,
+    requireMention: true,
+    session: {
+      ...h.session,
+      viewer: "viewer",
+      channels: {
+        ...h.session.channels,
+        list: () => list,
+        subscribeList: () => () => {},
+      },
+      channelWrites: {
+        ...h.session.channelWrites,
+        refreshMembership: vi.fn(async () => channel),
+      },
+    },
+  });
+  const onBlocked = vi.fn();
+  h.retarget({
+    submitRequest: {
+      id: "update:solo",
+      draft: {
+        text: "@Honey Read the thread again",
+        recipients: [{ ...first, start: 0, end: 6 }],
+      },
+      onBlocked,
+    },
+  });
+  await waitFor(() => expect(h.messages.send).toHaveBeenCalledOnce());
+  expect(h.messages.send.mock.calls[0]?.slice(0, 3)).toEqual([
+    "channel",
+    "@Honey Read the thread again",
+    [first.pubkey],
+  ]);
+  expect(onBlocked).not.toHaveBeenCalled();
+});
+
+it("preserves staged files when an explicit update is requested", async () => {
+  const h = mount();
+  h.retarget({
+    session: {
+      ...h.session,
+      attachments: { upload: vi.fn(async () => uploadDescriptor()) },
+    },
+  });
+  pickAttachments(h.container, [attachmentFile("notes.txt")]);
+  const onBlocked = vi.fn();
+  h.retarget({
+    submitRequest: {
+      id: "update:files",
+      draft: { text: "Update the catch-up", recipients: [] },
+      onBlocked,
+    },
+  });
+  await waitFor(() => expect(onBlocked).toHaveBeenCalledOnce());
+  expect(screen.getByText("notes.txt")).toBeInTheDocument();
+  expect(h.messages.send).not.toHaveBeenCalled();
+});
+
+it.each(["Keep my follow-up", "@reference"])(
+  "refuses an update without replacing the existing draft %s",
+  async (draft) => {
+    const submit = vi.fn();
+    const onBlocked = vi.fn();
+    const h = mount({
+      submitRequest: {
+        id: "update:blocked",
+        draft: { text: "Update the catch-up", recipients: [] },
+        onBlocked,
+      },
+      submission: {
+        draftKey: "catch-up:blocked",
+        initialDraft: draft,
+        locked: false,
+        disabled: false,
+        submit,
+      },
+    });
+    await waitFor(() => expect(onBlocked).toHaveBeenCalledOnce());
+    expect(h.input()).toHaveTextContent(draft);
+    expect(submit).not.toHaveBeenCalled();
+  },
+);
+
 it.each([undefined, "root"])(
   "prefills only exact selected agents after an accepted send in %s",
   (threadRootId) => {
