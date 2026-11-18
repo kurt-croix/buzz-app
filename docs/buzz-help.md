@@ -248,7 +248,9 @@ mention anyone. Explicit agent watches on that room can still receive them.
   verification code.
 - Set or clear your status from the profile menu, or with **Update status** /
   **Set a status** on your own profile. On a profile or in the profile menu,
-  hover the status emoji to see its `:name:`.
+  hover the status emoji to see its `:name:`. When you have no status, the editor
+  offers your last two custom statuses on this device under **Recent**, below
+  the quick statuses.
 - Where a community verifies names, the profile check appears beside the verified
   full name, or the verified username when no full name is supplied. The profile
   shows the issuer and verification time; cached verification has no check.
