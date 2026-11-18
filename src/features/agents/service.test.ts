@@ -574,6 +574,15 @@ it("binds a dedicated native agent and preserves its target when a provider chan
     name: "Dedicated",
   });
   await service.retype(agent.key, "example/native");
+  await vi.waitFor(() =>
+    expect(plugin.agents.handle(agent.key)?.updateAgent).toBeDefined(),
+  );
+  const propose = plugin.agents.handle(agent.key)?.updateAgent;
+  if (!propose) throw new Error("Missing update handle");
+  const { requestId } = await propose({
+    agent: agent.pubkey,
+    settings: { workspace: "/other/workspace" },
+  });
   const beforeBinding = service.local();
   expect(
     beforeBinding.agents.find((item) => item.pubkey === agent.pubkey)
@@ -615,6 +624,22 @@ it("binds a dedicated native agent and preserves its target when a provider chan
       settings: { workspace: "/other/workspace" },
     }),
   ).rejects.toThrow("execution adapter manages");
+  const opened = service.find(agent.key);
+  if (!opened) throw new Error("Missing agent");
+  await expect(
+    service.approveUpdate(
+      requestId,
+      {
+        type: opened.type,
+        name: opened.name,
+        config: { workspace: "/other/workspace" },
+      },
+      opened,
+    ),
+  ).rejects.toThrow("execution adapter manages");
+  expect(service.find(agent.key)?.config).toEqual(opened.config);
+  expect(service.updateRequests()[0]?.id).toBe(requestId);
+  service.dismissUpdate(requestId);
   expect(service.updateRequests()).toEqual([]);
 
   expect(
