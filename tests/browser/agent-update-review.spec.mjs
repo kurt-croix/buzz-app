@@ -155,3 +155,21 @@ test("a proposed Huddle voice needs a verified catalog before Save", async ({
     await page.evaluate(() => window.updateReviewResult()[0].config),
   ).not.toHaveProperty("voice");
 });
+
+test("owner review refuses an unavailable local Codex model", async ({
+  page,
+}) => {
+  await page.goto(
+    "/tests/fixtures/agent-library.html?settingsSync=codex&proposeSettings",
+  );
+  await page.evaluate(() =>
+    window.proposeFixtureSettings({ model: "missing-model" }),
+  );
+  const review = page.getByRole("dialog", { name: "Edit Ada" });
+  await expect(review).toContainText("missing-model");
+  await review.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(review.getByRole("alert")).toContainText(
+    "Choose an available Codex model or Codex default before saving.",
+  );
+  expect(await page.evaluate(() => window.updateReviewResult())).toEqual([]);
+});

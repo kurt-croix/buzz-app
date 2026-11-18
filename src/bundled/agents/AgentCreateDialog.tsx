@@ -688,6 +688,8 @@ export function AgentCreateDialog({
                   save={saveSettings}
                   settingsHost={{
                     pendingSave: saveSettings,
+                    proposedModel:
+                      update?.request.settings?.model !== undefined,
                     proposedVoice:
                       update?.request.settings?.voice !== undefined,
                   }}

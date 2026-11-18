@@ -332,6 +332,8 @@ export type AgentSettingsHost = Readonly<{
   typeControl?: (dirty: boolean, action?: ReactNode) => ReactNode;
   /** Host-owned type change committed with the target type's settings draft. */
   pendingSave?: (config?: unknown) => Promise<void>;
+  /** This owner review was seeded with an agent-proposed model. */
+  proposedModel?: boolean;
   /** This owner review was seeded with an agent-proposed Huddle voice. */
   proposedVoice?: boolean;
 }>;

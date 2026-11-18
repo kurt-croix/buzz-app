@@ -1471,6 +1471,15 @@ export function createTabs(
         });
         if (!validWorkspace(settings.workspace))
           throw new Error("Enter an absolute or ~/… workspace path.");
+        if (
+          settingsHost?.proposedModel &&
+          !bound &&
+          settings.model &&
+          !catalogModel(settings.model, data)
+        )
+          throw new Error(
+            "Choose an available Codex model or Codex default before saving.",
+          );
         if (settingsHost?.proposedVoice && settings.voice) {
           if (!data?.voices)
             throw new Error(
