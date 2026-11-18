@@ -1194,7 +1194,8 @@ available rather than silently discarding it.
 
 Agents can use `agent_update` to propose their own harness settings. Review the
 proposed values and select **Save** to apply them, or close the review to discard
-the request.
+the request. A Codex agent using an execution adapter can only propose the
+default Huddle voice.
 
 - An optional plugin can attach context to a native session. Follow-ups and
   reconnects keep that association. **New** starts another association. Each

@@ -141,7 +141,8 @@ agents in the same community, named by pubkey or exact name: a new name, a type
 key from `agent_types`, new instructions or a new picture. An agent may propose
 changes to itself, including model, thinking effort, session scope, and workspace in
 supported local harnesses. Codex additionally accepts Huddle voice and its apps
-and plugins preference. The Edit dialog shows the proposed values in the usual
+and plugins preference. A Codex agent using an execution adapter can only
+propose the default Huddle voice. The Edit dialog shows the proposed values in the usual
 settings controls, with a preview for a harness change. Absent fields stay as
 they are. Save applies the reviewed values. Closing the dialog discards the
 request. A type change carries what the new type adopts, as a manual one does. A proposed picture

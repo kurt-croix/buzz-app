@@ -18,7 +18,7 @@ export type AgentSettingsProposalSupport = Readonly<{
 
 /** Explain when the current agent can no longer accept a proposal. */
 export function settingsProposalProblem(
-  { apps, workspace }: AgentSettingsProposal,
+  { apps, workspace, voice }: AgentSettingsProposal,
   agent: Pick<Agent, "type" | "protection">,
   executionBinding: Agent["executionBinding"],
   proposedFromType = agent.type,
@@ -29,6 +29,8 @@ export function settingsProposalProblem(
     return "Protected agents cannot enable Codex apps and plugins.";
   if (executionBinding && (apps !== undefined || workspace !== undefined))
     return "The execution adapter manages apps and workspace.";
+  if (executionBinding && voice)
+    return "Agents using an execution adapter can only propose the default Huddle voice.";
 }
 
 /** Seed the normal Settings form. The form owns validation and its Save. */

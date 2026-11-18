@@ -544,7 +544,7 @@ it("binds a dedicated native agent and preserves its target when a provider chan
     id: "native",
     title: "Native",
     execution: true,
-    settingsProposal: {},
+    settingsProposal: { voice: true },
     protection: true,
     retire,
     defaults: () => ({ config: {} }),
@@ -582,6 +582,10 @@ it("binds a dedicated native agent and preserves its target when a provider chan
   const { requestId } = await propose({
     agent: agent.pubkey,
     settings: { workspace: "/other/workspace" },
+  });
+  const { requestId: voiceRequest } = await propose({
+    agent: agent.pubkey,
+    settings: { voice: "maple" },
   });
   const beforeBinding = service.local();
   expect(
@@ -640,6 +644,28 @@ it("binds a dedicated native agent and preserves its target when a provider chan
   expect(service.find(agent.key)?.config).toEqual(opened.config);
   expect(service.updateRequests()[0]?.id).toBe(requestId);
   service.dismissUpdate(requestId);
+  await expect(
+    handle.updateAgent({ agent: agent.pubkey, settings: { voice: "maple" } }),
+  ).rejects.toThrow("can only propose the default Huddle voice");
+  const approval = { type: opened.type, name: opened.name };
+  await expect(
+    service.approveUpdate(
+      voiceRequest,
+      { ...approval, config: { voice: "maple" } },
+      opened,
+    ),
+  ).rejects.toThrow("can only propose the default Huddle voice");
+  service.dismissUpdate(voiceRequest);
+  const { requestId: defaultVoiceRequest } = await handle.updateAgent({
+    agent: agent.pubkey,
+    settings: { voice: "" },
+  });
+  await service.approveUpdate(
+    defaultVoiceRequest,
+    { ...approval, config: { voice: "" } },
+    opened,
+  );
+  expect(service.find(agent.key)?.config).toEqual({ voice: "" });
   expect(service.updateRequests()).toEqual([]);
 
   expect(
