@@ -56,7 +56,6 @@ function setup({
   panel.dataset.readingSurface = "";
   const header = document.createElement("button");
   panel.append(header, element);
-  // The list's reader bar, beside it outside any reading surface.
   const bar = document.createElement("button");
   document.body.append(panel, composer, parent, outside, bar);
   ({ element, composer, parent, outside, header, bar })[focus].focus();
@@ -716,7 +715,6 @@ it("an arranged list's end row at the bottom catches up through the newest row",
     endMessageId: "bottom",
     rootId: "thread",
   });
-  // The newest row is ranked above, out of view.
   h.setRows([row("newest", -300, -200), row("bottom", 400, 500)]);
   h.mutation();
   vi.advanceTimersToNextFrame();
@@ -748,7 +746,6 @@ it("a list that turns partial mid-dwell drops its complete leases before they ca
   h.mutation();
   vi.advanceTimersToNextFrame();
   await vi.advanceTimersByTimeAsync(300);
-  // Only partial leases reach the dwell's end, and those never catch up.
   h.leases.forEach((lease, index) => {
     if (lease.catchUp.mock.calls.length)
       expect(h.reading.mock.calls[index]?.[2]).toBe(true);
