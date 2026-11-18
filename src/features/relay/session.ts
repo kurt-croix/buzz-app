@@ -368,6 +368,10 @@ export function createRelaySession(
               if (event.kind === 9007 || event.kind === 9000) return;
               const id = event.tags.find(([name]) => name === "h")?.[1];
               if (!id) return;
+              // Opening agents receive admin before either local wake or publication.
+              const opening =
+                event.kind === 9 ? channelWrites.prepareOpening(id) : undefined;
+              if (opening) return opening;
               const ready = channelWrites.starting(id);
               if (ready && event.kind === 9) hearStarting(event, id);
               return ready;
@@ -1560,11 +1564,12 @@ export function createRelaySession(
         liveListeners.delete(listener);
       };
     },
-    retry() {
+    retry(background?: boolean) {
       channels.retryList();
       revalidatePreviews(channels.suspendedPreviews());
       for (const id of channels.demandedChannels()) demandChannel(id);
-      traffic?.retry();
+      // A reconnect wait is live's own spread; the recovery timer keeps it.
+      if (!(background && liveView.status === "retrying")) traffic?.retry();
     },
   });
   /** Hands the owner's signed message in a chat still starting to live
@@ -1829,6 +1834,8 @@ export function createRelaySession(
     {
       selectable: () =>
         agentChoices.snapshot().selectable.map((agent) => agent.pubkey),
+      profiles: profiles.queries,
+      viewer: transport?.viewer ?? "",
       archived: (pubkey) =>
         agentUnavailable(
           {
@@ -1842,6 +1849,7 @@ export function createRelaySession(
     transport?.relayAuthor,
     { read: (filters, settings) => readVerified(filters, settings, false) },
     transport?.channelIdentity === true,
+    transport?.memberAdministration,
   );
   startingChannel = (id) => channelWrites.starting(id);
   // Roster authority invalidates in-flight reads, including account-owned
@@ -2419,7 +2427,7 @@ export function createRelaySession(
   const recoverable = (
     subscribe: (listener: () => void) => () => void,
     status: () => RecoveryStatus,
-    retry: () => void,
+    retry: (background?: boolean) => void,
     reauthorize?: () => void,
   ): RecoverySource =>
     Object.freeze({
