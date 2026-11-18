@@ -5099,7 +5099,11 @@ it("passes only explicit runtime settings through the owner review tool", async 
     workspace: "~/example",
   };
   await expect(
-    callTool(client, {}, "agent_update", { agent: "Self", ...settings }),
+    callTool(client, {}, "agent_update", {
+      agent: "Self",
+      ...settings,
+      model: "  ",
+    }),
   ).resolves.toBe('{"requestId":"draft","saved":false}');
   expect(client.updateAgent).toHaveBeenCalledWith({ agent: "Self", settings });
   for (const invalid of [
