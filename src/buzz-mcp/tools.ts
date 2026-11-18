@@ -636,7 +636,7 @@ const HANDLERS: Readonly<Record<string, Handler>> = {
       throw new Error("apps must be a boolean");
     const settings: AgentSettingsProposal = {
       ...(typeof model === "string" && { model: model.trim() }),
-      ...(typeof effort === "string" && { effort }),
+      ...(typeof effort === "string" && { effort: effort.trim() }),
       ...(scope !== undefined && { scope }),
       ...(typeof workspace === "string" && { workspace }),
       ...(typeof voice === "string" && { voice }),
