@@ -5094,7 +5094,7 @@ it("passes only explicit runtime settings through the owner review tool", async 
     model: "",
     effort: "high",
     scope: "community",
-    voice: "",
+    voice: "maple",
     apps: false,
     workspace: "~/example",
   };
@@ -5104,6 +5104,7 @@ it("passes only explicit runtime settings through the owner review tool", async 
       ...settings,
       model: "  ",
       effort: " high ",
+      voice: " maple ",
     }),
   ).resolves.toBe('{"requestId":"draft","saved":false}');
   expect(client.updateAgent).toHaveBeenCalledWith({ agent: "Self", settings });

@@ -639,7 +639,7 @@ const HANDLERS: Readonly<Record<string, Handler>> = {
       ...(typeof effort === "string" && { effort: effort.trim() }),
       ...(scope !== undefined && { scope }),
       ...(typeof workspace === "string" && { workspace }),
-      ...(typeof voice === "string" && { voice }),
+      ...(typeof voice === "string" && { voice: voice.trim() }),
       ...(typeof apps === "boolean" && { apps }),
     };
     const picture = proposedPicture(client, args.picture);
