@@ -1328,7 +1328,7 @@ function Timeline({
     )
       return;
     return () => {
-      if (savedPosition.current)
+      if (savedPosition.current && !arrangedNow.current)
         navigation.savePosition(TIMELINE_PLACE, savedPosition.current);
     };
   }, [navigation, presented]);
