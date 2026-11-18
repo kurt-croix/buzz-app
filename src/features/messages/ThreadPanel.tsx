@@ -19,6 +19,8 @@ import { useMessageSelectionCopy } from "./selection-copy";
 import { ReplySummary } from "./ReplySummary";
 import { ReplyBranch } from "./ReplyBranch";
 import { replyTree } from "./reply-tree";
+import { useArrangement, usePlace } from "./arrangement";
+import { ComposerAccessories } from "../conversation/ComposerAccessories";
 import { useChannelIdentityNames } from "../identity-names/react";
 import { formatPublicKey } from "../../shared/identity/public-key";
 import { Button } from "../../shared/design-system/ui/Button";
@@ -41,6 +43,7 @@ import type { ConversationExtensions } from "../conversation/contracts";
 import type { ChannelMessage } from "../relay/contracts";
 import type { RelaySession } from "../relay/session";
 import {
+  THREAD_LIMITS,
   threadFailure,
   type ThreadRetarget,
   type ThreadView,
@@ -226,6 +229,24 @@ type ThreadPlace = {
   anchor?: { id: string; top: number; ancestors: readonly string[] };
 };
 const THREAD_PLACE = "thread";
+/** The first reply in view, its offset from the scroller's top, and the replies
+ * drawn, in order: what a place intent keeps when the rows change owner. */
+function anchorAt(element: HTMLElement | null) {
+  if (!element) return undefined;
+  const top = element.getBoundingClientRect().top;
+  const rows = [
+    ...element.querySelectorAll<HTMLElement>("ol [data-message-id]"),
+  ];
+  const row = rows.find((row) => row.getBoundingClientRect().bottom > top);
+  const id = row?.dataset.messageId;
+  return row && id
+    ? {
+        id,
+        top: row.getBoundingClientRect().top - top,
+        order: rows.flatMap((row) => row.dataset.messageId ?? []),
+      }
+    : undefined;
+}
 /** Reader lifetime follows the open thread; navigation owns only a reveal request. */
 function RetainedThreadPanel(props: ThreadPanelProps) {
   type Opening = {
@@ -646,13 +667,36 @@ function ThreadMessages({
     const current = view.snapshot();
     return current.status === "ready" ? current.root : undefined;
   }, [view]);
-  const tree = useMemo(
+  // A plugin's rows replace the host's while it presents. What reads the host's
+  // own history (its unread line, arrivals, paging) keeps the host's rows.
+  const [arrangement, display] = useArrangement({
+    session,
+    channelId,
+    rootId: resolvedRoot,
+    limits: THREAD_LIMITS,
+  });
+  // A presentation's order is its own, so no row merges into another's bubble
+  // or sits under a day divider; each row's header carries its date.
+  const presented = !!display;
+  const shownReplies = display?.rows ?? snapshot.replies;
+  const hostTree = useMemo(
     () => replyTree(snapshot.replies, snapshot.root?.id),
     [snapshot.replies, snapshot.root?.id],
   );
+  const tree = useMemo(
+    () =>
+      display
+        ? replyTree(
+            display.rows,
+            resolvedRoot,
+            display.parents && ((id) => display.parents?.get(id)),
+          )
+        : hostTree,
+    [display, hostTree, resolvedRoot],
+  );
   const branchReplies = useMemo(() => {
     const branches = new Map<string, ChannelMessage[]>();
-    for (const reply of snapshot.replies) {
+    for (const reply of shownReplies) {
       for (const ancestor of tree.ancestors(reply.id)) {
         const replies = branches.get(ancestor) ?? [];
         replies.push(reply);
@@ -660,7 +704,7 @@ function ThreadMessages({
       }
     }
     return branches;
-  }, [tree, snapshot.replies]);
+  }, [tree, shownReplies]);
   const subscribeUnread = useCallback(
     (listener: () => void) =>
       session.unread.subscribe(
@@ -704,6 +748,24 @@ function ThreadMessages({
   }, [messageId, navigation?.signal, revealRequest, snapshot.replies, tree]);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [replyParent, setReplyParent] = useState<string>();
+  // A presentation opens the branches it lists, once each: the reader's later
+  // toggles stand until a presentation lists a branch it had not listed before.
+  const listedOpen = useRef<ReadonlySet<string>>(new Set());
+  const open = display?.open;
+  useLayoutEffect(() => {
+    const fresh = (open ?? []).filter((id) => !listedOpen.current.has(id));
+    listedOpen.current = new Set(open);
+    if (fresh.length) setExpanded((current) => new Set([...current, ...fresh]));
+  }, [open]);
+  // The last row drawn, pre-order through the branches shown open.
+  const endRow = useMemo(() => {
+    let end: string | undefined;
+    for (let level = tree.children.get(undefined); level?.length; ) {
+      end = level.at(-1)?.id;
+      level = end && expanded.has(end) ? tree.children.get(end) : undefined;
+    }
+    return end;
+  }, [tree, expanded]);
   const resolveName = useChannelIdentityNames(session, channelId);
   const senderName = (row: ChannelMessage) => {
     const id = row.workflowOwnerId ?? row.authorId;
@@ -718,19 +780,24 @@ function ThreadMessages({
     (root.workflowOwnerId ?? root.authorId) === session.viewer
       ? "Reply in thread"
       : `Reply in thread to ${senderName(root)}`;
-  const rows = useMemo(
+  const hostRows = useMemo(
     () =>
       snapshot.root ? [snapshot.root, ...snapshot.replies] : snapshot.replies,
     [snapshot.root, snapshot.replies],
+  );
+  const rows = useMemo(
+    () =>
+      display && snapshot.root ? [snapshot.root, ...display.rows] : hostRows,
+    [display, snapshot.root, hostRows],
   );
   // Remembered agents follow the viewer's latest message here, not the root.
   // Undefined until the first page lands: the seeded root is not yet the thread.
   const threadSeed = useMemo(
     () =>
       snapshot.status === "ready"
-        ? rows.filter((row) => row.authorId === session.viewer).at(-1)
+        ? hostRows.filter((row) => row.authorId === session.viewer).at(-1)
         : undefined,
-    [snapshot.status, rows, session.viewer],
+    [snapshot.status, hostRows, session.viewer],
   );
   const authors = [...new Set(rows.flatMap(rowProfileIds))].sort().join(":");
   const profileGeneration = useProfileGeneration(session.profiles);
@@ -744,6 +811,7 @@ function ThreadMessages({
   const profiles = useRowProfiles(session.profiles, rows);
   const agentPubkeys = useKnownAgentPubkeys(session, profiles);
   const scroller = useRef<HTMLElement>(null);
+  const readerBar = useRef<HTMLDivElement>(null);
   const positioned = useRef(false);
   const shown = useRef(active);
   const readingSettled = useRef(false);
@@ -1049,14 +1117,14 @@ function ThreadMessages({
       return (
         attention.unread ||
         attention.forced ||
-        (tree.children.get(row.id) ?? []).some(unread)
+        (hostTree.children.get(row.id) ?? []).some(unread)
       );
     };
-    const first = (tree.children.get(undefined) ?? []).find(unread);
+    const first = (hostTree.children.get(undefined) ?? []).find(unread);
     // A requested read time follows a read of the whole thread, so a nested
     // unread reply shows no new count: reveal it, as a reply target is.
     const nested = (row: ChannelMessage): ChannelMessage | undefined => {
-      for (const child of tree.children.get(row.id) ?? []) {
+      for (const child of hostTree.children.get(row.id) ?? []) {
         const attention = session.unread.attention(channelId, child.id, since);
         if (attention.unread || attention.forced) return child;
         const found = nested(child);
@@ -1089,13 +1157,14 @@ function ThreadMessages({
         oldest.createdAt >
           (since ?? session.unread.threadReadThrough(channelId, messageId)))
     ) {
-      if (snapshot.canLoadMore) void view.loadMore();
-      // Past the page limit the first unread reply stays unknown.
+      if (snapshot.canLoadMore && !presented) void view.loadMore();
+      // Past the page limit, or while a presentation shows, the first unread
+      // reply stays unknown.
       else setBoundary({ ...boundary, id: null });
       return;
     }
     if (revealed) {
-      const ancestors = tree.ancestors(revealed.id);
+      const ancestors = hostTree.ancestors(revealed.id);
       setExpanded((current) =>
         ancestors.every((id) => current.has(id))
           ? current
@@ -1113,7 +1182,8 @@ function ThreadMessages({
     rootTarget,
     snapshot,
     messageId,
-    tree,
+    hostTree,
+    presented,
     session.unread,
     channelId,
     view,
@@ -1127,8 +1197,15 @@ function ThreadMessages({
     setInlineReveal(request.signal);
     return () => request.abort();
   }, [revealSelected, revealRequest]);
-  const revealSignal =
-    inlineReveal ?? (positionedVisit ? undefined : navigation?.signal);
+  // A presentation may leave the opened message out: its reveal has nothing to
+  // show, so it yields (completing as opened) and the plugin sees `targetId`.
+  const targetHidden =
+    !!display &&
+    messageId !== resolvedRoot &&
+    !display.rows.some((row) => row.id === messageId);
+  const revealSignal = targetHidden
+    ? undefined
+    : (inlineReveal ?? (positionedVisit ? undefined : navigation?.signal));
   const revealed = useMessageReveal({
     scroller,
     focus:
@@ -1247,26 +1324,22 @@ function ThreadMessages({
   // branches do not mount their rows.
   // Each displayed level is projected alone, but a signed claim may name a
   // request loaded at another level.
-  const loadedRows = useMemo(
-    () =>
-      snapshot.root ? [snapshot.root, ...snapshot.replies] : snapshot.replies,
-    [snapshot.root, snapshot.replies],
-  );
   const rootReplies = useMemo(
     () =>
       activityPresentation(
-        tree.children.get(undefined) ?? [],
+        presented ? [] : (tree.children.get(undefined) ?? []),
         activitySnapshot,
         agentPubkeys,
         rootId,
         undefined,
-        loadedRows,
+        hostRows,
       ),
-    [tree, activitySnapshot, agentPubkeys, rootId, loadedRows],
+    [tree, presented, activitySnapshot, agentPubkeys, rootId, hostRows],
   );
   const liveAgents = useLiveConversationAgents(session, channelId, rootId);
   const lastMessage = publicMessageNeighbor(rows, rows.length, -1);
   const joinsLive =
+    !presented &&
     !!lastMessage &&
     !lastMessage.membership &&
     lastMessage.audience !== "agents" &&
@@ -1332,12 +1405,13 @@ function ThreadMessages({
   // Only legacy traversal is eager. Strict windows open at the newest page.
   useEffect(() => {
     if (
+      !presented &&
       snapshot.direction !== "older" &&
       snapshot.status === "ready" &&
       snapshot.canLoadMore
     )
       void view.loadMore();
-  }, [view, snapshot]);
+  }, [view, snapshot, presented]);
   useLayoutEffect(() => {
     const previous = previousReplies.current;
     const complete = snapshot.status === "ready" && !snapshot.canLoadMore;
@@ -1377,6 +1451,10 @@ function ThreadMessages({
       snapshot.target?.id === messageId &&
       revealed.current !== navigation.signal
     ) {
+      revealed.current = navigation.signal;
+      navigation.complete({ status: "opened" });
+    }
+    if (navigation && targetHidden && revealed.current !== navigation.signal) {
       revealed.current = navigation.signal;
       navigation.complete({ status: "opened" });
     }
@@ -1572,6 +1650,7 @@ function ThreadMessages({
     tree,
     expanded,
     boundary,
+    targetHidden,
   ]);
   // The effect above re-pins only when thread data changes. A growing composer
   // shrinks this viewport, late media grows rows and a join error grows the end
@@ -1618,6 +1697,7 @@ function ThreadMessages({
     revealed,
     snapshot,
     unreadBoundary,
+    targetHidden,
   ]);
   // An own send can land in the middle of a branch, not at the list bottom.
   // biome-ignore lint/correctness/useExhaustiveDependencies: Retry DOM lookup after history or branch visibility changes.
@@ -1673,6 +1753,42 @@ function ThreadMessages({
     observer.observe(end);
     return () => observer.disconnect();
   }, [active, initialPositioned, captureResizePosition, selectedOffset]);
+  const place = usePlace(arrangement, () => anchorAt(scroller.current));
+  useLayoutEffect(() => {
+    const element = scroller.current;
+    // A presentation made in this commit's layout effects reaches its rows in the next.
+    if (arrangement?.snapshot() !== display) return;
+    const shown = new Set(shownReplies.map((reply) => reply.id));
+    const at = place.take((id) => shown.has(id), display ? "start" : "end");
+    if (!element || !at) return;
+    if (typeof at === "object") {
+      // A row inside a closed branch opens it first; one never drawn is dropped.
+      const closed = tree.ancestors(at.id).filter((id) => !expanded.has(id));
+      if (closed.length) {
+        setExpanded((current) => new Set([...current, ...closed]));
+        return;
+      }
+      const row = element.querySelector<HTMLElement>(
+        `[data-message-id="${at.id}"]`,
+      );
+      if (row)
+        correctScrollTop(
+          element,
+          readingDrift(element, { element: row, top: at.top }),
+        );
+    } else element.scrollTop = at === "start" ? 0 : element.scrollHeight;
+    follow.current = at === "end";
+    place.done();
+    captureResizePosition();
+  }, [
+    arrangement,
+    display,
+    shownReplies,
+    tree,
+    expanded,
+    place,
+    captureResizePosition,
+  ]);
   const jumpToLatest = () => {
     const element = scroller.current;
     if (!element) return;
@@ -1695,6 +1811,7 @@ function ThreadMessages({
     }, 1000);
   };
   const keepReadingPosition = () => {
+    place.cancel();
     jumpingToLatest.current = false;
     if (jumpTimer.current !== undefined) {
       clearTimeout(jumpTimer.current);
@@ -1723,14 +1840,15 @@ function ThreadMessages({
     );
     if (parent === undefined && snapshot.root)
       requestRows.set(snapshot.root.id, snapshot.root);
+    // Activity folding reads list order as time: off while a presentation shows.
     const presentation = activityPresentation(
-      chronologicalSiblings,
+      presented ? [] : chronologicalSiblings,
       activitySnapshot,
       agentPubkeys,
       parent ?? rootId,
       // A failure with replies needs its own visible branch controls.
       (failure) => !tree.children.get(failure.id)?.length,
-      loadedRows,
+      hostRows,
     );
     const groups = presentation.groups.filter((group) =>
       group.ids.every((id) => !tree.children.get(id)?.length),
@@ -1752,6 +1870,7 @@ function ThreadMessages({
           : publicMessageNeighbor(siblings, index, 1);
       const children = tree.children.get(row.id);
       const continuation =
+        !presented &&
         !!previousReply &&
         previousReply !== snapshot.root &&
         previousParent === parent &&
@@ -1763,7 +1882,7 @@ function ThreadMessages({
         );
       // A collapsed branch breaks bubble grouping, not calendar continuity.
       const currentDay = new Date(row.createdAt * 1000).toDateString();
-      const day = previousDay !== currentDay;
+      const day = !presented && previousDay !== currentDay;
       previousDay = currentDay;
       previousReply =
         children?.length && !expanded.has(row.id) ? undefined : row;
@@ -1813,7 +1932,8 @@ function ThreadMessages({
               inside ||
               presentation.bubbleAnchors.has(row.id) ||
               (joinsLive && row.id === lastMessage?.id) ||
-              (!!nextRow &&
+              (!presented &&
+                !!nextRow &&
                 continuesMessageGroup(row, nextRow) &&
                 !children?.length)
             }
@@ -1853,7 +1973,7 @@ function ThreadMessages({
           className={styles.replyItem}
           data-layout={continuation ? "continuation" : "thread"}
         >
-          {!parent && row.id === unreadBoundary && (
+          {!presented && !parent && row.id === unreadBoundary && (
             <div className={styles.newMessages} data-new-messages-boundary>
               <hr className="sr-only select-none" aria-label="New messages" />
               <span className="select-none" aria-hidden="true">
@@ -1861,7 +1981,8 @@ function ThreadMessages({
               </span>
             </div>
           )}
-          {!parent &&
+          {!presented &&
+            !parent &&
             row.replyParentId &&
             row.replyParentId !== rootId &&
             !requestRows.has(row.replyParentId) && (
@@ -1951,7 +2072,9 @@ function ThreadMessages({
       );
     });
   }
-  const selectedParent = snapshot.replies.find((row) => row.id === replyParent);
+  const selectedParent =
+    snapshot.replies.find((row) => row.id === replyParent) ??
+    display?.rows.find((row) => row.id === replyParent);
   const captureOlderAnchor = (element: HTMLElement) => {
     follow.current = false;
     const row = [
@@ -1973,6 +2096,7 @@ function ThreadMessages({
     const element = scroller.current;
     if (
       !element ||
+      presented ||
       !olderDemand.current ||
       snapshot.direction !== "older" ||
       snapshot.status !== "ready" ||
@@ -1988,12 +2112,13 @@ function ThreadMessages({
   const selectionNotice =
     selectionFailure && !snapshot.error ? selectionFailure : undefined;
   const showOlderPageStatus =
+    !presented &&
     snapshot.direction === "older" &&
     snapshot.readKind === "older" &&
     !!snapshot.root;
   const targetUnavailable =
     snapshot.targetStatus === "unavailable" && !selectionNotice;
-  const historyError = !!snapshot.error && !showOlderPageStatus;
+  const historyError = !presented && !!snapshot.error && !showOlderPageStatus;
   const focusArchivedHistory = useCallback(() => {
     const history = scroller.current;
     if (
@@ -2032,14 +2157,36 @@ function ThreadMessages({
         // observe rows individually; an absent root must not mean channel catch-up.
         latestMessageId={
           snapshot.root
-            ? snapshot.replies.reduce<ChannelMessage | undefined>(
+            ? shownReplies.reduce<ChannelMessage | undefined>(
                 (latest, row) =>
                   !latest || row.createdAt > latest.createdAt ? row : latest,
                 undefined,
               )?.id
             : undefined
         }
+        // A presentation's list order is its own: the last row rendered is the
+        // end a dwell catches up at, and rows it leaves out stay unread.
+        endMessageId={presented ? endRow : undefined}
+        partial={!!display && !display.complete}
+        controls={readerBar}
       />
+      {/* Outside the composer, so every viewer sees the bar the composer hides from. */}
+      {arrangement && extensions?.accessories && (
+        <div ref={readerBar} className={styles.readerBar}>
+          <ComposerAccessories
+            registry={extensions.accessories}
+            placement="reader"
+            arrangement={arrangement}
+            session={session}
+            scope={scope}
+            channelId={channelId}
+            threadRootId={resolvedRoot}
+            targetId={messageId === resolvedRoot ? undefined : messageId}
+            canOpen={(target) => canOpenLink?.(target) ?? false}
+            open={onOpenLink}
+          />
+        </div>
+      )}
       <section
         ref={scroller}
         data-message-scroller
@@ -2054,7 +2201,7 @@ function ThreadMessages({
         aria-label="Thread messages"
         aria-busy={positioning}
         data-positioning={positioning || undefined}
-        data-jump-visible={showJumpToLatest || undefined}
+        data-jump-visible={(!presented && showJumpToLatest) || undefined}
         onScroll={(event) => {
           if (!positioned.current) return;
           const element = event.currentTarget;
@@ -2122,7 +2269,7 @@ function ThreadMessages({
         tabIndex={0}
       >
         <JumpToLatestButton
-          visible={showJumpToLatest}
+          visible={!presented && showJumpToLatest}
           newMessageCount={newMessageCount}
           onClick={jumpToLatest}
         />
@@ -2241,7 +2388,7 @@ function ThreadMessages({
               : "Couldn’t open that message."}
           </p>
         )}
-        {snapshot.limited && !snapshot.error && (
+        {!presented && snapshot.limited && !snapshot.error && (
           <p className={styles.threadNote}>Thread history limit reached.</p>
         )}
         {(historyError || (targetUnavailable && snapshot.root)) && (
