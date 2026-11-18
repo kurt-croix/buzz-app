@@ -544,6 +544,7 @@ it("binds a dedicated native agent and preserves its target when a provider chan
     id: "native",
     title: "Native",
     execution: true,
+    settingsProposal: {},
     protection: true,
     retire,
     defaults: () => ({ config: {} }),
@@ -603,6 +604,19 @@ it("binds a dedicated native agent and preserves its target when a provider chan
     finishRetirement();
   }
   await changing;
+  await vi.waitFor(() =>
+    expect(plugin.agents.handle(agent.key)?.updateAgent).toBeDefined(),
+  );
+  const handle = plugin.agents.handle(agent.key);
+  if (!handle?.updateAgent) throw new Error("Missing update handle");
+  await expect(
+    handle.updateAgent({
+      agent: agent.pubkey,
+      settings: { workspace: "/other/workspace" },
+    }),
+  ).rejects.toThrow("execution adapter manages");
+  expect(service.updateRequests()).toEqual([]);
+
   expect(
     service.local().agents.find((item) => item.pubkey === agent.pubkey)
       ?.execution,

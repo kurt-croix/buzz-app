@@ -4343,7 +4343,6 @@ export class AgentsService extends Service implements Agents {
           "Protected agents cannot enable Codex apps and plugins",
         );
       if (
-        support.apps &&
         this.executions.read(identity.key) &&
         (apps !== undefined || workspace !== undefined)
       )
