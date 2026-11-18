@@ -772,6 +772,7 @@ function PreparedMessageMarkdown({
       <CodeFence
         {...props}
         copy={interactive}
+        focusable={interactive}
         registry={interactive ? extensions?.codeBlocks : undefined}
         classes={MESSAGE_CODE_CLASSES}
       />

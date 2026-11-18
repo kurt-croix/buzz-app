@@ -59,9 +59,11 @@ import type {
 } from "../../features/agents/service";
 import type { EventData } from "../../features/relay/events";
 import { CREDENTIAL_ENV } from "../../features/host/service";
+import { isRetryableRead } from "../../features/relay/read-retry";
 import { threadReference } from "../../features/relay/thread-reference";
 import type { ChannelLabel } from "../../features/channels/channel-icon";
 import { appClient, readFile } from "../../buzz-mcp/app-client";
+import { readAuthorNames } from "../../features/agent-harness/author-names";
 import { readProject } from "../../features/agent-harness/project";
 import {
   referencedFolders,
@@ -236,6 +238,7 @@ type Once = {
 };
 /** A queued turn that later messages join once it starts. */
 type Next = {
+  request: TextRequest;
   began: Promise<Active | undefined>;
   begin: (active?: Active) => void;
 };
@@ -2188,18 +2191,36 @@ export class CodexRuntime {
         : undefined;
     if (communityLane) entry.lanes.set(key, communityLane);
     const activeCommunityTurn = communityLane?.active;
+    const nextCommunityTurn = communityLane?.queued
+      ? communityLane.next
+      : undefined;
+    const communityTarget =
+      nextCommunityTurn?.request ?? activeCommunityTurn?.reply;
+    const targetModel = nextCommunityTurn
+      ? nextCommunityTurn.request.model
+      : activeCommunityTurn?.model;
+    const targetEffort = nextCommunityTurn
+      ? nextCommunityTurn.request.effort
+      : activeCommunityTurn?.effort;
+    const separateWake =
+      communityTarget &&
+      (request.wake || communityTarget.wake) &&
+      ((request.wake && !("plugin" in request.wake)) ||
+        (communityTarget.wake && !("plugin" in communityTarget.wake)) ||
+        request.conversation.channelId !==
+          communityTarget.conversation.channelId ||
+        request.replyRoot !== communityTarget.replyRoot);
     const queueCommunity =
       communityLane &&
-      (!activeCommunityTurn?.turnId ||
-        activeCommunityTurn.finished ||
-        activeCommunityTurn.stopped ||
-        communityLane.queued ||
+      (!communityTarget ||
+        (!nextCommunityTurn &&
+          (activeCommunityTurn?.finished || activeCommunityTurn?.stopped)) ||
         communityLane.voice ||
-        request.wake ||
-        activeCommunityTurn.reply.wake ||
-        activeCommunityTurn.reply.unaddressed ||
-        (request.model && request.model !== activeCommunityTurn.model) ||
-        (request.effort && request.effort !== activeCommunityTurn.effort));
+        communityLane.voiceOpening ||
+        separateWake ||
+        communityTarget.unaddressed ||
+        (request.model && request.model !== targetModel) ||
+        (request.effort && request.effort !== targetEffort));
     entry.waiting.add(request);
     delivery.interruptible?.(() => this.interrupt(entry, key, request));
     const handoff = this.controls.deliver(
@@ -2250,11 +2271,10 @@ export class CodexRuntime {
               if (
                 active.finished ||
                 active.stopped ||
-                current.queued ||
-                (communityLane
-                  ? active !== activeCommunityTurn
-                  : request.conversation.topLevel !==
-                    active.reply.conversation.topLevel) ||
+                (!communityLane &&
+                  (current.queued ||
+                    request.conversation.topLevel !==
+                      active.reply.conversation.topLevel)) ||
                 (request.model && request.model !== active.model) ||
                 (request.effort && request.effort !== active.effort)
               ) {
@@ -2339,9 +2359,11 @@ export class CodexRuntime {
             .then(async () => {
               // Behind a queued turn, a message joins it once it starts, so a
               // backlog clears in one turn rather than one turn per message.
-              const active = current.queued
-                ? await current.next?.began
-                : current.active;
+              const active = communityLane
+                ? await (nextCommunityTurn?.began ?? activeCommunityTurn)
+                : current.queued
+                  ? await current.next?.began
+                  : current.active;
               if (!active) return queue();
               const steered = steer(active);
               // The turn ends only once what it may take in is placed.
@@ -2821,6 +2843,7 @@ export class CodexRuntime {
     current.queued++;
     let began!: (active?: Active) => void;
     const next: Next = {
+      request,
       began: new Promise((resolve) => (began = resolve)),
       begin: (active) => {
         next.begin = () => {};
@@ -2895,17 +2918,27 @@ export class CodexRuntime {
     if (reads?.scope !== request.scope)
       throw new Error("The community changed");
     if (request.unaddressed) return "";
-    // A chat its owner is still creating has nothing earlier to read.
-    const starting = (await reads.channel(request.conversation.channelId))
-      ?.starting;
-    return conversationHistory(
-      request.event,
-      request.conversation,
-      (filters) =>
-        starting ? Promise.resolve([]) : reads.read(filters, signal),
-      reads,
-      reads.workflowAuthority(),
-    );
+    try {
+      // A chat its owner is still creating has nothing earlier to read.
+      const starting = (await reads.channel(request.conversation.channelId))
+        ?.starting;
+      return await conversationHistory(
+        request.event,
+        request.conversation,
+        (filters) =>
+          starting ? Promise.resolve([]) : reads.read(filters, signal),
+        reads,
+        reads.workflowAuthority(),
+      );
+    } catch (error) {
+      // The relay session already retried; a slow relay costs the turn its
+      // earlier messages, not the turn itself.
+      if (signal.aborted || !isRetryableRead(error)) throw error;
+      console.warn("Codex could not read the conversation", error);
+      // Without history, the turn still names who asked.
+      await readAuthorNames(reads, [request.event]);
+      return "";
+    }
   }
   // Tags the owner even when a sibling asked: tagging the sibling would wake
   // it, and two agents failing alike would wake each other without end.
