@@ -23,6 +23,8 @@ import type {
   Delivery,
 } from "../../features/agents/service";
 import type { Host } from "../../features/host/service";
+import { VECTOR_PROFILE } from "../../features/agents/gateway/vectors";
+import { ELSEWHERE, PROTECTED, UNAPPLIED } from "./attribution";
 import type { AgentProtection } from "../../features/agent-protection/service";
 import type {
   EventData,
@@ -102,10 +104,14 @@ function setup(
     nativeHistory?: readonly unknown[];
     /** Raw text after the history, as a line Claude is still writing. */
     nativeTail?: string;
+    /** Each Claude process's own settings env. */
+    env?: Record<string, string>;
+    /** The agent's route for a session control. */
+    gatewayRoute?: ConstructorParameters<typeof ClaudeRuntime>[13];
     resolveDirectory?: Host["resolveDirectory"];
   }> = {},
 ) {
-  const fake = fakeSpawn();
+  const fake = fakeSpawn(undefined, options.env);
   const transcriptReaders: { options: unknown }[] = [];
   const spawn: typeof fake.spawn = async (id, spawnOptions) => {
     await options.starting;
@@ -249,6 +255,13 @@ function setup(
     config,
     () => added,
     options.repositories,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    options.gatewayRoute,
   );
   const published: { kind: number; content: string; tags: string[][] }[] = [];
   const publish = vi.fn(async (template: (typeof published)[number]) => {
@@ -3596,6 +3609,291 @@ it("drops a mention stopped while queued behind an Attention refresh", async () 
   } finally {
     release();
     f.runtime.dispose();
+  }
+});
+
+const gatewayIdentity = {
+  community_id: "11111111-2222-4333-8444-555555555555",
+  human_pubkey: alice,
+  agent_pubkey: self,
+};
+const eligible = {
+  kind: "eligible",
+  revision: 2,
+  gatewayOrigin: "https://gateway.example",
+  identity: gatewayIdentity,
+  profile: VECTOR_PROFILE,
+  harnesses: ["claude-code"],
+} as const;
+const { headers: roles } = VECTOR_PROFILE;
+/** A person's own gateway setup, as the tray app writes it. */
+const onGateway = {
+  ANTHROPIC_BASE_URL: "https://gateway.example/pass-through/anthropic",
+  ANTHROPIC_CUSTOM_HEADERS: "x-keep: configured",
+};
+/** The runner's frozen `gateway` for a turn caused by `message`. */
+const dispatched = (message: string | null) =>
+  ({
+    gateway: {
+      route: eligible,
+      turn: { channel_id: null, message_id: message, thread_id: null },
+      upstream: { base: "/claude" },
+    },
+  }) as unknown as Partial<Delivery>;
+/** A header's value in Claude's newline-separated custom headers. */
+const header = (headers: string | undefined, name: string) =>
+  headers
+    ?.split("\n")
+    .find((line) => line.startsWith(`${name}: `))
+    ?.slice(name.length + 2);
+/** A thread's root and a reply in it, for a second turn in one conversation. */
+const threadPair = () => {
+  const root = message("2", "@Claude hi", {
+    tags: [
+      ["h", channel],
+      ["p", self],
+    ],
+  });
+  const reply = message("3", "@Claude also", {
+    tags: [
+      ["h", channel],
+      ["e", root.id, "", "reply"],
+      ["p", self],
+    ],
+  });
+  return { root, reply };
+};
+const settled = (f: ReturnType<typeof setup>) =>
+  Promise.all(f.workingUntil.mock.calls.map(([done]) => done));
+
+it("attributes each new turn, keeps a steer on its turn, and keeps the Buzz session", async () => {
+  const f = setup([], { env: onGateway, hold: true });
+  const { root, reply } = threadPair();
+  await f.deliver({ type: "mention", event: root }, dispatched(root.id));
+  await vi.waitFor(() => expect(f.claudes()[0]?.prompts).toHaveLength(1));
+  const claude = f.claudes()[0];
+  if (!claude) throw new Error("Expected Claude");
+  // Steered into the running turn: no new attribution.
+  await f.deliver({ type: "mention", event: reply }, dispatched(reply.id));
+  await vi.waitFor(() => expect(claude.prompts).toHaveLength(2));
+  claude.finish();
+  await settled(f);
+  const next = message("4", "@Claude more", {
+    tags: [
+      ["h", channel],
+      ["e", root.id, "", "reply"],
+      ["p", self],
+    ],
+  });
+  claude.hold = false;
+  await f.deliver({ type: "mention", event: next }, dispatched(next.id));
+  await vi.waitFor(() => expect(claude.prompts).toHaveLength(3));
+  await settled(f);
+  const [first, steered, third] = claude.headers;
+  expect(header(first, roles.message_id)).toBe(root.id);
+  expect(steered).toBe(first);
+  expect(header(third, roles.message_id)).toBe(next.id);
+  for (const headers of claude.headers)
+    expect(headers?.split("\n")[0]).toBe("x-keep: configured");
+  // One process, one Buzz session saved beside its harness session.
+  expect(f.claudes()).toHaveLength(1);
+  const session = header(first, roles.launcher_session);
+  expect(header(third, roles.launcher_session)).toBe(session);
+  const [saved] = localSessions(f.runtime["storage"], self)
+    .list()
+    .map(([, saved]) => saved);
+  expect(saved?.gateway).toMatchObject({ client_session_id: session });
+  f.runtime.dispose();
+});
+
+it("resumes a stopped session on its Buzz session, and New session starts another", async () => {
+  const f = setup([], { env: onGateway });
+  const root = message("2", "@Claude hi", {
+    tags: [
+      ["h", channel],
+      ["p", self],
+    ],
+  });
+  const place = { channelId: channel, root: root.id };
+  const agent = { ...f.agent, config: DEFAULT_CONFIG } as unknown as Agent;
+  const turn = async (id: string) => {
+    const event = message(id, "@Claude again", {
+      tags: [
+        ["h", channel],
+        ["e", root.id, "", "reply"],
+        ["p", self],
+      ],
+    });
+    await f.deliver({ type: "mention", event }, dispatched(event.id));
+    await settled(f);
+    const claude = f.claudes().at(-1);
+    return header(claude?.headers.at(-1), roles.launcher_session);
+  };
+  await f.deliver({ type: "mention", event: root }, dispatched(root.id));
+  await settled(f);
+  const first = header(f.claudes()[0]?.headers[0], roles.launcher_session);
+  // Its process stopped: the next turn resumes the session in a new one.
+  f.claudes()[0]?.exit(0);
+  await flush();
+  await expect(turn("3")).resolves.toBe(first);
+  expect(f.claudes().at(-1)?.options.args).toContain("--resume");
+  await f.runtime.session(agent, place, "new");
+  const rotated = await turn("4");
+  expect(rotated).toMatch(/^[0-9a-f-]{36}$/);
+  expect(rotated).not.toBe(first);
+  f.runtime.dispose();
+});
+
+it("restores the person's own headers for a turn the gateway doesn't attribute", async () => {
+  const f = setup([], { env: onGateway });
+  const { root, reply } = threadPair();
+  await f.deliver({ type: "mention", event: root }, dispatched(root.id));
+  await settled(f);
+  // Blocked or pending: the runner sends it without `gateway`.
+  await f.deliver({ type: "mention", event: reply }, {
+    gatewayFallback: { reason: "network", notice: "Ran without it." },
+  } as unknown as Partial<Delivery>);
+  await settled(f);
+  const [claude] = f.claudes();
+  expect(claude?.prompts).toHaveLength(2);
+  expect(header(claude?.headers[0], roles.message_id)).toBe(root.id);
+  expect(claude?.headers[1]).toBe("x-keep: configured");
+  f.runtime.dispose();
+});
+
+it("runs a turn unattributed, with a notice, off the gateway or when Claude refuses the headers", async () => {
+  const spy = (f: ReturnType<typeof setup>) =>
+    vi.spyOn(
+      f.runtime as unknown as { noted: (...args: unknown[]) => void },
+      "noted",
+    );
+  const { root, reply } = threadPair();
+  const off = setup([], { env: { ANTHROPIC_BASE_URL: "https://api.example" } });
+  const offNoted = spy(off);
+  await off.deliver({ type: "mention", event: root }, dispatched(root.id));
+  await settled(off);
+  expect(off.claudes()[0]?.headers).toEqual([undefined]);
+  expect(offNoted).toHaveBeenCalledWith(self, expect.any(String), ELSEWHERE);
+  off.runtime.dispose();
+
+  const f = setup([], { env: onGateway });
+  const noted = spy(f);
+  await f.deliver({ type: "mention", event: root }, dispatched(root.id));
+  await settled(f);
+  const [claude] = f.claudes();
+  if (!claude) throw new Error("Expected Claude");
+  claude.refuseEnv = true;
+  await f.deliver({ type: "mention", event: reply }, dispatched(reply.id));
+  await settled(f);
+  // The conversation goes on in the same process and session.
+  expect(claude.prompts).toHaveLength(2);
+  expect(f.claudes()).toHaveLength(1);
+  expect(noted).toHaveBeenLastCalledWith(self, expect.any(String), UNAPPLIED);
+  await expect(f.workingUntil.mock.calls.at(-1)?.[0]).resolves.toMatchObject({
+    ok: true,
+  });
+  f.runtime.dispose();
+});
+
+it("attributes a compaction under the control's own context, and never refuses one", async () => {
+  let route: typeof eligible | undefined = eligible;
+  const f = setup([], { env: onGateway, gatewayRoute: () => route });
+  const root = message("2", "@Claude hi", {
+    tags: [
+      ["h", channel],
+      ["p", self],
+    ],
+  });
+  const place = { channelId: channel, root: root.id };
+  const agent = { ...f.agent, config: DEFAULT_CONFIG } as unknown as Agent;
+  await f.deliver({ type: "mention", event: root }, dispatched(root.id));
+  await settled(f);
+  const idle = () =>
+    vi.waitFor(() => expect(f.runtime.sessionState(agent, place)).toBe("idle"));
+  await idle();
+  await f.runtime.session(agent, place, "compact");
+  const [claude] = f.claudes();
+  expect(claude?.prompts.at(-1)).toBe("/compact");
+  const compacted = claude?.headers.at(-1);
+  // The control's channel isn't a UUID here, so only its thread is sent;
+  // it never carries a message.
+  expect(header(compacted, roles.thread_id)).toBe(root.id);
+  expect(header(compacted, roles.message_id)).toBeUndefined();
+  expect(header(compacted, roles.launcher_session)).toBe(
+    header(claude?.headers[0], roles.launcher_session),
+  );
+  // Flag off, blocked or pending: it compacts on the person's own headers.
+  route = undefined;
+  await idle();
+  await f.runtime.session(agent, place, "compact");
+  expect(claude?.prompts.at(-1)).toBe("/compact");
+  expect(claude?.headers.at(-1)).toBe("x-keep: configured");
+  f.runtime.dispose();
+});
+
+it("attributes a standalone wake on a fresh Buzz session it never saves", async () => {
+  const f = setup([], { env: onGateway });
+  const config = DEFAULT_CONFIG;
+  f.runtime.sync([{ pubkey: self, config } as Agent]);
+  const turn = () =>
+    f.runtime.runOnce({
+      delivery: { agent: f.agent, config, ...dispatched(null) },
+      key: "watch",
+      signal: new AbortController().signal,
+      prompt: () => "check the build",
+    } as unknown as Parameters<typeof f.runtime.runOnce>[0]);
+  await expect(turn()).resolves.toMatchObject({ ok: true });
+  await expect(turn()).resolves.toMatchObject({ ok: true });
+  const sessions = f
+    .claudes()
+    .filter((claude) => claude.prompts.length)
+    .map((claude) => header(claude.headers[0], roles.launcher_session));
+  expect(sessions).toHaveLength(2);
+  expect(sessions[0]).toMatch(/^[0-9a-f-]{36}$/);
+  expect(sessions[0]).not.toBe(sessions[1]);
+  expect(localSessions(f.runtime["storage"], self).list()).toEqual([]);
+  f.runtime.dispose();
+});
+
+it("keeps a protected agent's pinned launch unattributed, saying so", async () => {
+  const f = setup([], { env: onGateway, nativeHistory: [] });
+  const noted = vi.spyOn(
+    f.runtime as unknown as { noted: (...args: unknown[]) => void },
+    "noted",
+  );
+  const protection = {
+    key: "policy",
+    stateKey: "revision",
+    processProtection: { readOnlyPaths: [], hiddenPaths: [] },
+    assertAvailable() {},
+    check: vi.fn<AgentProtection["check"]>().mockResolvedValue(),
+    spawn: async () => {
+      throw new Error("Unused protected runtime");
+    },
+  };
+  const root = message("1", "Howzit");
+  await f.deliver({ type: "mention", event: root }, {
+    agent: { ...f.agent, protection },
+    ...dispatched(root.id),
+  } as unknown as Partial<Delivery>);
+  await vi.waitFor(() =>
+    expect(f.claudes().some((worker) => worker.prompts.length)).toBe(true),
+  );
+  const worker = f.claudes().find((candidate) => candidate.prompts.length);
+  try {
+    expect(worker?.options.args).toContain("--setting-sources");
+    expect(
+      worker?.received.some(
+        (message) =>
+          (message.request as { subtype?: string } | undefined)?.subtype ===
+          "apply_flag_settings",
+      ),
+    ).toBe(false);
+    expect(worker?.headers).toEqual(["x-keep: configured"]);
+    expect(noted).toHaveBeenCalledWith(self, expect.any(String), PROTECTED);
+  } finally {
+    worker?.finish();
+    await f.runtime.retire(self);
   }
 });
 

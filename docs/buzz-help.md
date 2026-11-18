@@ -1623,6 +1623,23 @@ available rather than silently discarding it.
   gateway" with the reason. A sign-in the gateway refuses fails the turn
   instead. Buzz never resends work already sent through the gateway without
   it.
+- Where a build enables it, a Claude agent whose own Claude settings already
+  point at the agent gateway adds Buzz's session, agent and conversation
+  headers to each turn, keeping its other custom headers. Buzz rereads
+  Claude's settings at each new turn, so an edited endpoint or header counts
+  from the next turn; when attribution stops, Buzz puts back the person's
+  current headers. Buzz never changes Claude's endpoint, sign-in or provider.
+  A turn that can't be attributed still runs, and Activity notes "Not
+  attributed in the agent gateway" with the reason. That happens with another
+  endpoint or provider, settings Claude didn't report or take, or a managed
+  policy's or another tool's Claude settings, which Buzz leaves alone. It
+  also happens when custom headers are set only in the environment Buzz was
+  started from; Buzz leaves those as they are, and Claude itself doesn't go
+  back to them once a settings file's headers are removed. Protected Claude
+  agents are not attributed yet: their pinned launch ignores Claude's
+  settings files, including a gateway app's. Claude agents running on a
+  remote execution target are not attributed either; Buzz leaves their
+  Claude settings alone.
 - **Agents → Your teams → Previous versions**, in a team's editor, lists the
   saved versions of a team that syncs to a community, the same way. Reverting
   restores its instructions and keeps its current name; members are not
