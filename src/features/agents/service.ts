@@ -331,6 +331,8 @@ export type AgentSettingsHost = Readonly<{
   typeControl?: (dirty: boolean, action?: ReactNode) => ReactNode;
   /** Host-owned type change committed with the target type's settings draft. */
   pendingSave?: (config?: unknown) => Promise<void>;
+  /** This owner review was seeded with an agent-proposed Huddle voice. */
+  proposedVoice?: boolean;
 }>;
 /** What each of a type's settings tabs receives. A type writes only its own
  * config; the app owns the name and attention. */

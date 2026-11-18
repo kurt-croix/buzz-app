@@ -222,7 +222,9 @@ if (thinkingHarness === "claude") {
     data: {
       models: [model],
       defaultVoice: "cove",
-      voices: ["cove", "maple", "vale", "porto"],
+      ...(!new URLSearchParams(location.search).has("voicesUnavailable") && {
+        voices: ["cove", "maple", "vale", "porto"],
+      }),
       previews: Object.fromEntries(
         ["cove", "maple", "vale"].map((voice) => [
           voice,
