@@ -3142,7 +3142,6 @@ it("persists a community mention's destination separately from the tool context"
   const f = setup({
     wait: () => ({ status: "done", answer: 1, text: "done" }),
   });
-  f.solo.add(channel);
   const event = reply("2", "first");
   const turn = f.deliver(
     { type: "mention", event },
@@ -3153,7 +3152,7 @@ it("persists a community mention's destination separately from the tool context"
     await f.settled(turn);
     expect(f.host.requests("deliver")[0]?.params).toMatchObject({
       request: event.id,
-      reply: { channel, root: root.id, topLevel: true },
+      reply: { channel, root: root.id, topLevel: false },
     });
     expect(f.host.requests("wait")[0]?.params).toMatchObject({
       request: event.id,
