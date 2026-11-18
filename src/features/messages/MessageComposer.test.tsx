@@ -8804,19 +8804,31 @@ it("keeps retry submission available while a new Solo draft is locked", () => {
 
 it("submits one seeded host request after its composer is ready", async () => {
   const submit = vi.fn();
+  const onBlocked = vi.fn();
+  const draft = {
+    text: "What’s new here that I need to know about?",
+    recipients: [],
+  };
+  const request = {
+    id: "catch-up:one",
+    draft,
+    seeded: true,
+    onBlocked,
+  };
   const h = mount({
-    submitRequest: "catch-up:one",
+    submitRequest: request,
     submission: {
       draftKey: "catch-up",
-      initialDraft: "What’s new here that I need to know about?",
+      initialDraft: draft,
       locked: false,
       disabled: false,
       submit,
     },
   });
   await waitFor(() => expect(submit).toHaveBeenCalledOnce());
-  h.retarget({ submitRequest: "catch-up:one" });
+  h.retarget({ submitRequest: request });
   expect(submit).toHaveBeenCalledOnce();
+  expect(onBlocked).not.toHaveBeenCalled();
   expect(submit).toHaveBeenCalledWith(
     {
       text: "What’s new here that I need to know about?",
@@ -8828,6 +8840,86 @@ it("submits one seeded host request after its composer is ready", async () => {
     undefined,
     undefined,
   );
+});
+
+it("never automatically submits an edited already-seeded host request", async () => {
+  const submit = vi.fn();
+  const onBlocked = vi.fn();
+  const h = mount({
+    submitRequest: {
+      id: "catch-up:edited",
+      draft: { text: "Generated catch-up", recipients: [] },
+      seeded: true,
+      onBlocked,
+    },
+    submission: {
+      draftKey: "catch-up:edited",
+      initialDraft: "My edited catch-up",
+      locked: false,
+      disabled: false,
+      submit,
+    },
+  });
+  await waitFor(() => expect(onBlocked).toHaveBeenCalledOnce());
+  expect(h.input()).toHaveTextContent("My edited catch-up");
+  expect(submit).not.toHaveBeenCalled();
+});
+
+it("disarms an already-seeded host request when it changes before readiness", async () => {
+  const submit = vi.fn();
+  const onBlocked = vi.fn();
+  const draft = { text: "Generated catch-up", recipients: [] };
+  const submission = {
+    draftKey: "catch-up:pending-edit",
+    initialDraft: draft,
+    locked: false,
+    disabled: true,
+    submit,
+  };
+  const h = mount({
+    submitRequest: {
+      id: "catch-up:pending-edit",
+      draft,
+      seeded: true,
+      onBlocked,
+    },
+    submission,
+  });
+  h.fill("Generated catch-up changed");
+  await waitFor(() => expect(onBlocked).toHaveBeenCalledOnce());
+  h.retarget({ submission: { ...submission, disabled: false } });
+  await waitFor(() => expect(h.input()).toHaveTextContent("changed"));
+  expect(submit).not.toHaveBeenCalled();
+});
+
+it("disarms an already-seeded host request when its rich document changes", async () => {
+  const submit = vi.fn();
+  const onBlocked = vi.fn();
+  const draft = { text: "Generated catch-up", recipients: [] };
+  const submission = {
+    draftKey: "catch-up:pending-format",
+    initialDraft: draft,
+    locked: false,
+    disabled: true,
+    submit,
+  };
+  const h = mount({
+    submitRequest: {
+      id: "catch-up:pending-format",
+      draft,
+      seeded: true,
+      onBlocked,
+    },
+    submission,
+  });
+  act(() => {
+    h.input().setSelectionRange(0, draft.text.length);
+    h.input().toggleFormat("bold");
+  });
+  await waitFor(() => expect(onBlocked).toHaveBeenCalledOnce());
+  h.retarget({ submission: { ...submission, disabled: false } });
+  expect(h.input().innerHTML).toContain("<strong>");
+  expect(submit).not.toHaveBeenCalled();
 });
 
 it("seeds an explicit update into an empty composer and submits it once", async () => {

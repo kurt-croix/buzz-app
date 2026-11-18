@@ -77,10 +77,9 @@ import {
 } from "../../features/channel-navigation/sidebar-rows-service";
 import { SidebarRowRenderer } from "../../features/channel-navigation/SidebarRowRenderer";
 import {
-  CATCH_UP_WORKSPACE_NAME,
-  hasLegacyCatchUpWorkspaceName,
+  catchUpWorkspaceDisplayName,
   isCatchUpWorkspace,
-} from "../bestie/catch-up-workspace";
+} from "../../features/solo/catch-up-workspace";
 
 const emptyRows: readonly RegisteredSidebarRows[] = [];
 
@@ -293,6 +292,7 @@ export function SoloWorkspaces({
     name: string;
   }>();
   const groups = snapshot.data?.sections ?? [];
+  const ordinaryGroups = groups.filter((group) => !isCatchUpWorkspace(group));
   const orderWritable = preferences.sectionOrderWritable;
   const [orderFocus, setOrderFocus] = useState<string>();
   useLayoutEffect(() => {
@@ -305,8 +305,15 @@ export function SoloWorkspaces({
     setOrderFocus(undefined);
   }, [orderFocus]);
   const moveProject = (id: string, to: number) => {
-    const ids = groups.map((group) => group.id).filter((key) => key !== id);
-    ids.splice(to, 0, id);
+    if (!ordinaryGroups.some((group) => group.id === id)) return;
+    const ordinaryIds = ordinaryGroups
+      .map((group) => group.id)
+      .filter((key) => key !== id);
+    ordinaryIds.splice(to, 0, id);
+    const ids = [
+      ...ordinaryIds,
+      ...groups.filter(isCatchUpWorkspace).map((group) => group.id),
+    ];
     void preferences.reorderSections(id, ids).catch(() => {});
   };
   const assigned = snapshot.data?.assignments ?? {};
@@ -330,9 +337,7 @@ export function SoloWorkspaces({
   }, [draftProject, scope]);
   const project = (group: (typeof groups)[number]) => ({
     ...group,
-    name: hasLegacyCatchUpWorkspaceName(group.name)
-      ? CATCH_UP_WORKSPACE_NAME
-      : group.name,
+    name: catchUpWorkspaceDisplayName(group.name),
     rows: chats.filter((item) => assignmentFor(item) === group.id),
   });
   const projects = [
@@ -551,8 +556,10 @@ export function SoloWorkspaces({
       chats.some((item) => item.id === move.channelId),
     ) ?? [];
   const entries = visible.map((project) => {
-    const groupIndex = groups.findIndex((group) => group.id === project.id);
-    const reorderable = !!project.id && orderWritable;
+    const groupIndex = ordinaryGroups.findIndex(
+      (group) => group.id === project.id,
+    );
+    const reorderable = groupIndex >= 0 && orderWritable;
     const open =
       !collapsed.includes(project.id) || renamingProject === project.id;
     const changeOpen = (open: boolean) =>
@@ -597,7 +604,7 @@ export function SoloWorkspaces({
           <>
             {actions}
             <MenuItem
-              disabled={!orderWritable || groupIndex <= 0}
+              disabled={!reorderable || groupIndex <= 0}
               onClick={() => moveProject(project.id, groupIndex - 1)}
             >
               <MenuIcon>
@@ -606,7 +613,7 @@ export function SoloWorkspaces({
               Move up
             </MenuItem>
             <MenuItem
-              disabled={!orderWritable || groupIndex >= groups.length - 1}
+              disabled={!reorderable || groupIndex >= ordinaryGroups.length - 1}
               onClick={() => moveProject(project.id, groupIndex + 1)}
             >
               <MenuIcon>
@@ -912,8 +919,10 @@ export function SoloWorkspaces({
         onMove={(id, key) => move(id, key.slice(DROP.length) || undefined)}
         onReorder={(key, over) => {
           const id = key.slice(DROP.length);
-          const to = groups.findIndex((group) => DROP + group.id === over);
-          if (groups.some((group) => group.id === id) && to >= 0)
+          const to = ordinaryGroups.findIndex(
+            (group) => DROP + group.id === over,
+          );
+          if (ordinaryGroups.some((group) => group.id === id) && to >= 0)
             moveProject(id, to);
         }}
         overlay={(id, group) => {

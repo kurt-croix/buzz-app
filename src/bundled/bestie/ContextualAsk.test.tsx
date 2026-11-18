@@ -501,7 +501,7 @@ it("offers the exact saved Bestie and seeds an automatic whole-thread catch-up",
     threadRootId: message.id,
     replyParentId: message.id,
   };
-  render(
+  const action = (openChat: (target: string) => boolean) => (
     <ToastProvider>
       <MenuRoot>
         <MenuTrigger>Message actions</MenuTrigger>
@@ -511,12 +511,13 @@ it("offers the exact saved Bestie and seeds an automatic whole-thread catch-up",
             session={session}
             close={() => {}}
             canOpen={() => true}
-            open={open}
+            open={openChat}
           />
         </MenuPopup>
       </MenuRoot>
-    </ToastProvider>,
+    </ToastProvider>
   );
+  render(action(open));
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "Message actions" }));
   const item = await screen.findByRole("menuitem", { name: "Catch me up" });
@@ -545,14 +546,62 @@ it("offers the exact saved Bestie and seeds an automatic whole-thread catch-up",
   expect(readView(scope, `${key}:submit-request`, null)).toBe(
     open.mock.calls[0]?.[0],
   );
+  expect(readView(scope, `${key}:submit-draft`, null)).toEqual(draft);
   expect(readView(scope, `${key}:settings`, null)).toEqual({
-    name: "Launch plan · Nov 11",
+    name: "Thread catch-up · Nov 11",
     ttlSeconds: 604800,
     lifetimeChosen: true,
   });
+  expect(readView(scope, `${key}:panel-title`, null)).toBe(
+    "Launch plan · Nov 11",
+  );
   expect(thread).toHaveBeenCalledWith("design", message.id);
   expect(dispose).toHaveBeenCalledOnce();
   expect(startChat).not.toHaveBeenCalled();
+
+  cleanup();
+  const edited = { ...draft, text: "Keep my edited catch-up" };
+  writeView(scope, `${key}:new-draft`, edited);
+  writeView(scope, `${key}:settings`, {
+    name: "My catch-up",
+    ttlSeconds: 0,
+    lifetimeChosen: true,
+  });
+  writeView(scope, `${key}:submit-draft`, null);
+  writeView(scope, `${key}:submit-request`, null);
+  const reopen = vi.fn<(target: string) => boolean>(() => true);
+  render(action(reopen));
+  const reopenUser = userEvent.setup();
+  await reopenUser.click(
+    screen.getByRole("button", { name: "Message actions" }),
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Catch me up" }));
+  expect(reopen).toHaveBeenCalledOnce();
+  expect(readView(scope, `${key}:new-draft`, null)).toEqual(edited);
+  expect(readView(scope, `${key}:settings`, null)).toEqual({
+    name: "My catch-up",
+    ttlSeconds: 0,
+    lifetimeChosen: true,
+  });
+  expect(readView(scope, `${key}:submit-draft`, null)).toBeNull();
+  expect(readView(scope, `${key}:submit-request`, null)).toBeNull();
+
+  cleanup();
+  writeView(scope, `${key}:new-draft`, null);
+  writeView(scope, `${key}:settings`, null);
+  writeView(scope, `${key}:started-chat`, message.channelId);
+  const resume = vi.fn<(target: string) => boolean>(() => true);
+  render(action(resume));
+  const resumeUser = userEvent.setup();
+  await resumeUser.click(
+    screen.getByRole("button", { name: "Message actions" }),
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Catch me up" }));
+  expect(resume).toHaveBeenCalledOnce();
+  expect(readView(scope, `${key}:new-draft`, null)).toBeNull();
+  expect(readView(scope, `${key}:settings`, null)).toBeNull();
+  expect(readView(scope, `${key}:submit-draft`, null)).toBeNull();
+  expect(readView(scope, `${key}:submit-request`, null)).toBeNull();
 });
 
 it("replaces the fallback panel title with the seeded catch-up topic", async () => {
@@ -562,8 +611,9 @@ it("replaces the fallback panel title with the seeded catch-up topic", async () 
     link: `buzz://message?channel=design&id=${message.id}`,
   });
   writeView(scope, `${key}:settings`, {
-    name: "Launch plan · Nov 11",
+    name: "Thread catch-up · Nov 11",
   });
+  writeView(scope, `${key}:panel-title`, "Launch plan · Nov 11");
   const none: readonly never[] = [];
   const contributions = { snapshot: () => none, subscribe: () => () => {} };
   const relaySnapshot = {
@@ -764,78 +814,109 @@ it("does not move an existing catch-up back after the owner re-files it", async 
 });
 
 it.each([
-  { label: "deleted", archived: false },
-  { label: "archived", archived: true },
-])("restarts a catch-up whose saved chat was $label", async ({ archived }) => {
-  const channelId = crypto.randomUUID();
-  const sourceId = message.id;
-  const key = contextualDraftKey(sourceId, "b".repeat(64));
-  const startedKey = `${key}:started-chat`;
-  writeView(scope, startedKey, channelId);
-  writeView(scope, `${key}:source`, {
-    channelId: message.channelId,
-    link: `buzz://message?channel=${message.channelId}&id=${message.id}`,
-  });
-  const channelSnapshot = {
-    status: "ready" as const,
-    channels: archived
-      ? [
-          {
-            id: channelId,
-            name: "Old catch-up",
-            channelType: "solo" as const,
-            members: [viewer, "b".repeat(64)],
-            archived: true,
-          },
-        ]
-      : [],
-  };
-  const catchUpSession = {
-    ...session,
-    channels: {
-      ...session.channels,
-      list: () => channelSnapshot,
-      subscribeList: () => () => {},
-    },
-  } as unknown as RelaySession;
-  const relaySnapshot = {
-    status: "ready" as const,
-    generation: 1,
-    scope,
-    origin: "https://relay.test",
-    viewer,
-    session: catchUpSession,
-  };
-  const relay = {
-    snapshot: () => relaySnapshot,
-    subscribe: () => () => {},
-    retry() {},
-    tryAgain() {},
-    disconnect() {},
-    clearCache: async () => {},
-  } satisfies RelayData;
-  const none: readonly never[] = [];
-  const contributions = { snapshot: () => none, subscribe: () => () => {} };
-  render(
-    <ToastProvider>
-      <ContextualAskPanel
-        target={contextualCatchUpTarget({
-          thread: sourceId,
-          agent: "b".repeat(64),
-        })}
-        close={() => {}}
-        relay={relay}
-        host={{} as never}
-        extensions={{ tools: contributions, inline: contributions }}
-      />
-    </ToastProvider>,
-  );
-  expect(
-    await screen.findByRole("form", { name: "Send a message to this chat" }),
-  ).toBeInTheDocument();
-  expect(readView(scope, startedKey, null)).toBeNull();
-  expect(screen.queryByText("Opening your chat…")).toBeNull();
-});
+  {
+    label: "deleted",
+    archived: false,
+    partial: false,
+    rosterAsOf: 1,
+    restarts: true,
+  },
+  {
+    label: "archived",
+    archived: true,
+    partial: false,
+    rosterAsOf: 1,
+    restarts: true,
+  },
+  {
+    label: "temporarily omitted from a partial roster",
+    archived: false,
+    partial: true,
+    rosterAsOf: 1,
+    restarts: false,
+  },
+])(
+  "$restarts a catch-up whose saved chat was $label",
+  async ({ archived, partial, rosterAsOf, restarts }) => {
+    const channelId = crypto.randomUUID();
+    const sourceId = message.id;
+    const key = contextualDraftKey(sourceId, "b".repeat(64));
+    const startedKey = `${key}:started-chat`;
+    writeView(scope, startedKey, channelId);
+    writeView(scope, `${key}:source`, {
+      channelId: message.channelId,
+      link: `buzz://message?channel=${message.channelId}&id=${message.id}`,
+    });
+    const channelSnapshot = {
+      status: "ready" as const,
+      ...(partial ? { coverage: "partial" as const } : {}),
+      rosterAsOf,
+      channels: archived
+        ? [
+            {
+              id: channelId,
+              name: "Old catch-up",
+              channelType: "solo" as const,
+              members: [viewer, "b".repeat(64)],
+              archived: true,
+            },
+          ]
+        : [],
+    };
+    const catchUpSession = {
+      ...session,
+      channels: {
+        ...session.channels,
+        list: () => channelSnapshot,
+        subscribeList: () => () => {},
+      },
+    } as unknown as RelaySession;
+    const relaySnapshot = {
+      status: "ready" as const,
+      generation: 1,
+      scope,
+      origin: "https://relay.test",
+      viewer,
+      session: catchUpSession,
+    };
+    const relay = {
+      snapshot: () => relaySnapshot,
+      subscribe: () => () => {},
+      retry() {},
+      tryAgain() {},
+      disconnect() {},
+      clearCache: async () => {},
+    } satisfies RelayData;
+    const none: readonly never[] = [];
+    const contributions = { snapshot: () => none, subscribe: () => () => {} };
+    render(
+      <ToastProvider>
+        <ContextualAskPanel
+          target={contextualCatchUpTarget({
+            thread: sourceId,
+            agent: "b".repeat(64),
+          })}
+          close={() => {}}
+          relay={relay}
+          host={{} as never}
+          extensions={{ tools: contributions, inline: contributions }}
+        />
+      </ToastProvider>,
+    );
+    if (restarts) {
+      expect(
+        await screen.findByRole("form", {
+          name: "Send a message to this chat",
+        }),
+      ).toBeInTheDocument();
+      expect(readView(scope, startedKey, null)).toBeNull();
+      expect(screen.queryByText("Opening your chat…")).toBeNull();
+    } else {
+      expect(await screen.findByText("Opening your chat…")).toBeInTheDocument();
+      expect(readView(scope, startedKey, null)).toBe(channelId);
+    }
+  },
+);
 
 it("does not resume a former Bestie's chat for the same source", async () => {
   const source = {

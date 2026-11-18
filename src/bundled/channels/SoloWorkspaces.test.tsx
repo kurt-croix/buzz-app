@@ -246,19 +246,62 @@ it("labels and places the generated catch-up workspace after Chats", async () =>
   const h = fixture("Work", [
     { id: "work", name: "Work", order: 0 },
     { id: "bestie-catch-ups", name: "Catch-ups", order: 1 },
+    { id: "personal", name: "Personal", order: 2 },
   ]);
   const store = h.store();
   render(h.view(store.queries));
   try {
+    const user = userEvent.setup();
     const work = await screen.findByRole("button", { name: "Work" });
+    const personal = screen.getByRole("button", { name: "Personal" });
     const chats = screen.getByRole("button", { name: "Chats" });
     const catchUp = screen.getByRole("button", { name: "Catch me up" });
     expect(
       work.compareDocumentPosition(chats) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
+      work.compareDocumentPosition(personal) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
       chats.compareDocumentPosition(catchUp) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+    await user.click(
+      screen.getByRole("button", { name: "Actions for Planning" }),
+    );
+    (await screen.findByRole("menuitem", { name: "Move to" })).focus();
+    await user.keyboard("{ArrowRight}");
+    expect(
+      await screen.findByRole("menuitem", { name: "Catch me up" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("menuitem", { name: "Catch-ups" })).toBeNull();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.getAllByRole("menu")).toHaveLength(1));
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole("button", { name: "Actions for Work" }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Move down" }),
+    );
+    await waitFor(() =>
+      expect(
+        store.queries.snapshot().data?.sections.map(({ id }) => id),
+      ).toEqual(["personal", "work", "bestie-catch-ups"]),
+    );
+    expect(
+      personal.compareDocumentPosition(work) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    await user.click(
+      screen.getByRole("button", { name: "Actions for Catch me up" }),
+    );
+    expect(
+      await screen.findByRole("menuitem", { name: "Move up" }),
+    ).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("menuitem", { name: "Move down" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
   } finally {
     store.dispose();
   }

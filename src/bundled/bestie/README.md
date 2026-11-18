@@ -293,7 +293,6 @@ is absent and **Start Solo chat** remains.
 
 Catch-up chats explicitly start with a seven-day inactivity lifetime, independent
 of the general new-Solo default. The panel shows the current lifetime and opens
-the existing Chat settings dialog to change it. Reopening a thread catch-up
-returns to its conversation; **Update catch-up** explicitly requests another
-summary through its ordinary composer, preserving any existing draft or files.
+the existing Chat settings dialog to change it. Reopening a catch-up returns to
+the same conversation.
 The panel host supplies the only header and close controls.

@@ -32,7 +32,10 @@ import {
   subscribeView,
   viewRevision,
 } from "../../shared/view-state";
-import { MessageComposer } from "../messages/MessageComposer";
+import {
+  MessageComposer,
+  type MessageComposerProps,
+} from "../messages/MessageComposer";
 import {
   parseSoloModelPicks,
   soloModelPicksKey,
@@ -225,7 +228,7 @@ export function SoloDraft({
   agent?: string | undefined;
   focusRequest?: number | AbortSignal;
   /** Starts one host-seeded request as soon as the shared composer is ready. */
-  submitRequest?: string | undefined;
+  submitRequest?: MessageComposerProps["submitRequest"];
   extensions?: ConversationExtensions | undefined;
   session: RelaySession;
   scope: string;

@@ -13,6 +13,8 @@ export function isCatchUpWorkspace(workspace: { id: string; name: string }) {
   );
 }
 
-export function hasLegacyCatchUpWorkspaceName(name: string) {
-  return workspaceName(name) === workspaceName(LEGACY_CATCH_UP_WORKSPACE_NAME);
+export function catchUpWorkspaceDisplayName(name: string) {
+  return workspaceName(name) === workspaceName(LEGACY_CATCH_UP_WORKSPACE_NAME)
+    ? CATCH_UP_WORKSPACE_NAME
+    : name;
 }
