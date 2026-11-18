@@ -2922,12 +2922,13 @@ it("finishes a Solo turn under its policy when the chat is converted mid-turn, a
   const config = { ...DEFAULT_CONFIG, scope: "channel" };
   runtime.sync([{ key: self, pubkey: self, config } as Agent]);
   await flush(10);
-  const run = (event: RelayEvent) =>
+  const run = (event: RelayEvent, effort?: string) =>
     runtime.run({
       trigger: { type: "mention", event },
       channelId: channel,
       agent,
       config,
+      effort,
       signal: new AbortController().signal,
       workingUntil: () => undefined,
     } as unknown as Delivery);
@@ -2935,9 +2936,9 @@ it("finishes a Solo turn under its policy when the chat is converted mid-turn, a
   await flush(10);
   const claude = claudes().find((process) => process.prompts.length);
   solo.delete(channel);
-  await run(mention("2"));
+  await run(mention("2"), "high");
   await flush(10);
-  // It waits for the Solo turn rather than steering into it.
+  // An effort change waits for its own turn.
   expect(claude?.prompts).toHaveLength(1);
   // Admitted to the channel's conversation, it is told so even if the agent
   // is moved to thread scope meanwhile.

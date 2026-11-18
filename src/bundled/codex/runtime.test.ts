@@ -5645,8 +5645,11 @@ it("finishes a Solo turn under its policy when the chat is converted mid-turn", 
   await f.runtime.run(channelScope(f.delivery("@Codex first")));
   await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
   soloChannels.delete("channel");
-  await f.runtime.run(channelScope(f.delivery("@Codex after share")));
-  // The converted chat's request waits for the Solo turn instead of steering in.
+  await f.runtime.run({
+    ...channelScope(f.delivery("@Codex after share")),
+    effort: "high",
+  });
+  // An effort change waits for its own turn.
   await f.tool("send", { audience: "everyone", text: "Progress" });
   expect(f.sent.filter((w) => w.method === "turn/steer")).toHaveLength(0);
   expect(f.starts()).toHaveLength(1);
@@ -8415,6 +8418,63 @@ it.each(["attention", "plugin"] as const)(
         expect.objectContaining({
           tags: expect.arrayContaining([["h", "channel"]]),
         }),
+      ]);
+      await f.complete(0);
+    } finally {
+      f.runtime.dispose();
+    }
+  },
+);
+
+it.each(["channel", "thread"] as const)(
+  "steers a top-level plugin wake into an active %s session only when they share it",
+  async (scope) => {
+    const f = fixture();
+    const first = f.delivery("Threaded work");
+    if (first.trigger.type !== "mention") throw new Error("Expected a mention");
+    const config = { ...(first.config as object), scope };
+    const wake = pluginWake(f);
+    if (wake.trigger.type !== "plugin")
+      throw new Error("Expected a plugin wake");
+    try {
+      await f.runtime.run({ ...first, config });
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      await f.runtime.run({
+        ...wake,
+        config,
+        trigger: { ...wake.trigger, topLevel: true },
+      });
+      if (scope === "thread") {
+        await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+        expect(f.sent.filter((wire) => wire.method === "turn/steer")).toEqual(
+          [],
+        );
+        await Promise.all([f.complete(0), f.complete(1)]);
+        return;
+      }
+      await vi.waitFor(() =>
+        expect(
+          f.sent.filter((wire) => wire.method === "turn/steer").map(inputText),
+        ).toEqual([expect.stringContaining("CI failed: lint")]),
+      );
+      expect(f.starts()).toHaveLength(1);
+      await f.tool("send", {
+        request: first.trigger.event.id,
+        audience: "everyone",
+        text: "Thread reply",
+      });
+      await f.tool("send", {
+        channel: "channel",
+        audience: "everyone",
+        text: "Channel reply",
+      });
+      expect(tagsOf(f)).toEqual([
+        [
+          ["h", "channel"],
+          ["e", root, "", "reply"],
+          ["buzz:request", first.trigger.event.id],
+        ],
+        [["h", "channel"]],
       ]);
       await f.complete(0);
     } finally {

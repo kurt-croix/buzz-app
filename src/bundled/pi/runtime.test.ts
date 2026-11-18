@@ -2320,7 +2320,7 @@ it("keeps mention activity when a watch joins without presentation callbacks", a
   }
 });
 
-it("waits for a recovered threaded wake before changing the shared conversation to channel posting", async () => {
+it("delivers a compatible channel wake while a recovered threaded wake is active", async () => {
   const old = deferred<unknown>();
   const f = setup({
     unfinished: () => ({
@@ -2351,11 +2351,18 @@ it("waits for a recovered threaded wake before changing the shared conversation 
       },
       { config: { ...DEFAULT_CONFIG, scope: "channel" } },
     );
-    await vi.waitFor(() => expect(f.host.requests("wait")).toHaveLength(1));
-    expect(f.host.requests("deliver")).toHaveLength(0);
+    await vi.waitFor(() =>
+      expect(
+        f.host.requests("wait").map(({ params }) => params.submission),
+      ).toContain(41),
+    );
+    await vi.waitFor(() => expect(f.host.requests("deliver")).toHaveLength(1));
+    expect(f.host.requests("deliver")[0]?.params).toMatchObject({
+      key: channel,
+      reply: { channel, topLevel: true },
+    });
     old.resolve({ status: "done", answer: 5, text: "Recovered answer" });
     await next.run;
-    expect(f.host.requests("deliver")).toHaveLength(1);
   } finally {
     old.resolve({ status: "unanswered", reason: "aborted" });
     f.runtime.dispose();

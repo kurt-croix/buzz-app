@@ -160,7 +160,7 @@ type Receipt = Pick<Delivery, "step" | "acknowledged" | "superseded"> & {
   scope: string;
   /** Where a run's failure for it is reported. */
   where?: Where;
-  /** A recovered turn holds its posting policy until its run settles. */
+  /** A recovered turn keeps its own reply destination until its run settles. */
   settled?: Promise<void>;
   /** Records a successful final post before the native tail drains. */
   published?: () => void;
@@ -182,7 +182,6 @@ type Entry = {
   policies: Map<
     string,
     {
-      topLevel: boolean;
       steerable?(model?: string, effort?: string): boolean;
       handed: Promise<unknown>;
       settled: Promise<unknown>;
@@ -655,15 +654,10 @@ export class PiRuntime {
     signal.throwIfAborted();
     const root = threadReference(event)?.rootId ?? event.id;
     const where = { channel, root, topLevel };
-    // A turn keeps the posting policy it was admitted with: a request under
-    // the other policy waits for the conversation's turns to settle rather
-    // than steering into them and changing their tools' context.
     const prior = entry.policies.get(key);
     const same =
-      key === COMMUNITY_SESSION
-        ? entry.config.scope === "community" &&
-          prior?.steerable?.(model, effort) === true
-        : prior?.topLevel === topLevel;
+      (key !== COMMUNITY_SESSION || entry.config.scope === "community") &&
+      prior?.steerable?.(model, effort) === true;
     const wait =
       key === COMMUNITY_SESSION || entry.policies.has(COMMUNITY_SESSION)
         ? Promise.all(
@@ -690,7 +684,8 @@ export class PiRuntime {
           .filter((receipt) =>
             key === COMMUNITY_SESSION
               ? !same || receipt.key !== key || !receipt.where
-              : receipt.key === key && receipt.where?.topLevel !== topLevel,
+              : receipt.key === key &&
+                (!receipt.where || (!same && (!!model || !!effort))),
           )
           .map((receipt) => receipt.settled),
       );
@@ -840,7 +835,6 @@ export class PiRuntime {
       foregroundDone = true;
     });
     const policy = {
-      topLevel,
       steerable: (nextModel?: string, nextEffort?: string) =>
         !interrupted &&
         !foregroundDone &&

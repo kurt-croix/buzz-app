@@ -2256,16 +2256,10 @@ export class CodexRuntime {
               // Steering cannot carry a model or effort pick, so a
               // differing pick waits for this turn and runs as the next one.
               // Messages after it join that turn instead: steering would run
-              // them first. A turn keeps the posting policy it was admitted
-              // with, so a request under the other policy waits for it too. A
-              // turn the owner stopped takes nothing more.
+              // them first. A turn the owner stopped takes nothing more.
               if (
                 active.finished ||
                 active.stopped ||
-                (!communityLane &&
-                  (current.queued ||
-                    request.conversation.topLevel !==
-                      active.reply.conversation.topLevel)) ||
                 (request.model && request.model !== active.model) ||
                 (request.effort && request.effort !== active.effort)
               ) {
@@ -2982,7 +2976,7 @@ export class CodexRuntime {
     const args = call.arguments as Record<string, unknown>;
     const answering = active ? [...active.requests] : [];
     const request =
-      active?.reply.settings.scope === "community" &&
+      active &&
       (call.tool === "send" || call.tool === "reply_in_subthread") &&
       typeof args.request === "string"
         ? (answering.find((pending) => pending.event?.id === args.request) ??
