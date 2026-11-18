@@ -7,7 +7,7 @@ import {
 import type { AddedTool } from "../../buzz-mcp/session-tools";
 import { pubkeyOf } from "../../features/agents/membership";
 import { PROMPTS_PREFIX } from "../../features/agents/session-prompts";
-import { ownerReads } from "../../features/agents/reads";
+import { type AgentReads, ownerReads } from "../../features/agents/reads";
 import type { MemoryEntry } from "../../features/agents/memory";
 import type {
   Agent,
@@ -510,6 +510,68 @@ it("gives the workflow reason for its owner's workflow mention that doesn't name
   });
   await turn.run;
   expect(turn.ignored).toHaveBeenCalledExactlyOnceWith("workflow");
+  expect(host.processes).toEqual([]);
+});
+
+it("waits for a workflow mention's community, not for its owner's", async () => {
+  const { deliver, runtime } = setup();
+  const relay = keypair();
+  const readyReads = vi.fn(async () => runtime["reads"](self));
+  Object.assign(runtime, { readyReads });
+  const event = eventDto(
+    signed(relay, {
+      kind: 9,
+      content: "@Agent workflow",
+      tags: [
+        ["h", channel],
+        ["p", self],
+        ["buzz:workflow", "true"],
+        ["buzz:workflow-owner", alice],
+      ],
+    }),
+  );
+  await deliver({ type: "mention", event }).run;
+  expect(readyReads).toHaveBeenCalledOnce();
+  await deliver({ type: "mention", event: { ...event, pubkey: alice } }).run;
+  expect(readyReads).toHaveBeenCalledOnce();
+});
+
+it.each([
+  ["checks authority with the reads it waited for", true, "workflow"],
+  ["ignores it when the agent was replaced during the wait", false, undefined],
+])("a waited-for workflow mention %s", async (_name, stays, reason) => {
+  const { host, deliver, runtime } = setup();
+  const relay = keypair();
+  const waited = {
+    workflowAuthority: vi.fn(() => relay.pubkey),
+    profiles: async () => {},
+    profile: () => undefined,
+  } as unknown as AgentReads;
+  let live = true;
+  Object.assign(runtime, {
+    readyReads: async () => {
+      live = stays;
+      return waited;
+    },
+  });
+  const event = eventDto(
+    signed(relay, {
+      kind: 9,
+      content: "@Agent workflow",
+      tags: [
+        ["h", channel],
+        ["p", self],
+        ["buzz:workflow", "true"],
+        ["buzz:workflow-owner", alice],
+      ],
+    }),
+  );
+  const turn = deliver({ type: "mention", event }, { current: () => live });
+  await turn.run;
+  if (reason) expect(waited.workflowAuthority).toHaveBeenCalled();
+  expect(turn.ignored).toHaveBeenCalledExactlyOnceWith(
+    ...(reason ? [reason] : []),
+  );
   expect(host.processes).toEqual([]);
 });
 
@@ -3130,6 +3192,87 @@ it.each(["thread", "community"] as const)(
     }
   },
 );
+
+it("persists a community mention's destination separately from the tool context", async () => {
+  const f = setup({
+    wait: () => ({ status: "done", answer: 1, text: "done" }),
+  });
+  const event = reply("2", "first");
+  const turn = f.deliver(
+    { type: "mention", event },
+    { config: { ...DEFAULT_CONFIG, scope: "community" } },
+  );
+  try {
+    await turn.run;
+    await f.settled(turn);
+    expect(f.host.requests("deliver")[0]?.params).toMatchObject({
+      request: event.id,
+      reply: { channel, root: root.id, topLevel: false },
+    });
+    expect(f.host.requests("wait")[0]?.params).toMatchObject({
+      request: event.id,
+    });
+  } finally {
+    f.runtime.dispose();
+  }
+});
+
+it("uses a recovered community mention's saved destination and skips unknown destinations", async () => {
+  const saved = "4".repeat(64);
+  const legacy = "5".repeat(64);
+  const other = "other";
+  const f = setup({
+    unfinished: () => ({
+      submissions: [
+        {
+          submission: 41,
+          conversation: CONVERSATION,
+          key: "@community",
+          request: saved,
+          context: { channel },
+          reply: { channel: other, root: root.id, topLevel: true },
+        },
+        {
+          submission: 42,
+          conversation: CONVERSATION,
+          key: "@community",
+          request: legacy,
+          context: { channel },
+        },
+      ],
+    }),
+    wait: ({ submission }) =>
+      submission === 41 || submission === 42
+        ? {
+            status: "unanswered",
+            reason: "error",
+            detail: `Failed ${submission}`,
+          }
+        : { status: "done", answer: 1, text: "done" },
+  });
+  try {
+    const next = f.deliver(
+      { type: "mention", event: reply("2", "after restart") },
+      { config: { ...DEFAULT_CONFIG, scope: "community" } },
+    );
+    await next.run;
+    await f.settled(next);
+    expect(
+      f.host.requests("wait").map(({ params }) => params.submission),
+    ).toEqual(expect.arrayContaining([41, 42]));
+    expect(f.published).toEqual([
+      expect.objectContaining({
+        content: expect.stringContaining("Failed 41"),
+        tags: [
+          ["h", other],
+          ["p", alice],
+        ],
+      }),
+    ]);
+  } finally {
+    f.runtime.dispose();
+  }
+});
 
 it("drains a recovered destinationless community wake before another turn", async () => {
   const drained = deferred<unknown>();

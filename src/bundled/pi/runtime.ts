@@ -52,7 +52,7 @@ import { type AgentKey, pubkeyOf } from "../../features/agents/membership";
 import { sessionPrompts } from "../../features/agents/session-prompts";
 import { standaloneSessions } from "../../features/agents/standalone-sessions";
 import { localStore, type AgentStore } from "../../features/agents/store";
-import type { AgentReads } from "../../features/agents/reads";
+import { type AgentReads, workflowMarked } from "../../features/agents/reads";
 import type {
   Agent,
   AgentHandle,
@@ -268,6 +268,13 @@ export class PiRuntime {
     private readonly storage: AgentStore = localStore(),
     /** The model gateway's routes and context; none: all external. */
     private readonly seam?: GatewaySeam,
+    /** The agent's reads once its community is ready, for a workflow's
+     * mention that arrived while it reconnects; rejects when `signal` aborts. */
+    private readonly readyReads?: (
+      agent: AgentHandle,
+      signal: AbortSignal,
+      channelId: string | undefined,
+    ) => Promise<AgentReads | undefined>,
   ) {
     this.pi = new Pi(
       () => this.spawn,
@@ -623,15 +630,30 @@ export class PiRuntime {
     // code, and the agent's own handoff comes from a turn already acting
     // for the owner.
     const wake = trigger.type !== "mention" ? trigger : undefined;
-    // Attention refreshes its instructions and retains its recovery destination.
-    // Guarded plugin wakes use the same callback for their final guard.
+    // Attention refreshes its instructions. Guarded plugin wakes use the
+    // same callback for their final guard.
     const attention = wake?.type === "attention";
     // Pi runs commands as you; mentions need owner or delegated authority.
     if (trigger.type === "mention") {
+      // A workflow's mention waits out a reconnect; the check below decides.
+      const ready = workflowMarked(trigger.event, agent.owner)
+        ? this.readyReads
+        : undefined;
+      const reads = ready
+        ? await ready(
+            agent,
+            signal,
+            channelId ?? trigger.event.tags.find((tag) => tag[0] === "h")?.[1],
+          )
+        : this.reads(agent.key);
+      if (ready) {
+        signal.throwIfAborted();
+        if (current && !current()) return ignored?.();
+      }
       const authority = await mentionAuthority(
         trigger.event,
         agent.owner,
-        workflowOf(this.reads(agent.key), agent.pubkey),
+        workflowOf(reads, agent.pubkey),
       );
       if (authority !== "owner") return ignored?.(authority);
     }
@@ -673,6 +695,7 @@ export class PiRuntime {
     signal.throwIfAborted();
     const root = threadReference(event)?.rootId ?? event.id;
     const where = { channel, root, topLevel };
+    const saveReply = attention || (!wake && key === COMMUNITY_SESSION);
     // A turn keeps the posting policy it was admitted with: a request under
     // the other policy waits for the conversation's turns to settle rather
     // than steering into them and changing their tools' context.
@@ -798,7 +821,7 @@ export class PiRuntime {
           text,
           steer: steerPrompt(text),
           request,
-          ...(attention ? { reply: where } : {}),
+          ...(saveReply ? { reply: where } : {}),
           ...(attention || accepted ? { refresh: true } : {}),
           // A mention's request row notes how it ran; a wake has none, so
           // its turn in this conversation's Activity does.
@@ -839,7 +862,7 @@ export class PiRuntime {
           entry,
           agent.key,
           submitted.submission,
-          attention ? request : undefined,
+          saveReply ? request : undefined,
         );
         // An answer Pi wrote without `send` stays in local activity.
         if (waited.status === "done") return { ok: true };
@@ -1270,8 +1293,10 @@ export class PiRuntime {
     const aborted = new Set<number>();
     // The conversations with a mention's or Attention wake's run to continue.
     const continued = new Set(
-      unfinished.flatMap(({ conversation, request, context }) =>
-        context?.channel && !request.startsWith(WAKE) ? [conversation] : [],
+      unfinished.flatMap(({ conversation, request, context, reply }) =>
+        (reply || context?.channel) && !request.startsWith(WAKE)
+          ? [conversation]
+          : [],
       ),
     );
     for (const {
@@ -1296,10 +1321,8 @@ export class PiRuntime {
       // it, as a plugin's wake saves no destination of its own. It is still
       // waited for, as only then does its run's failure end what is queued
       // behind it, which reports it.
-      if (
-        request.startsWith(WAKE) ||
-        (!context?.channel && key === COMMUNITY_SESSION)
-      ) {
+      const channel = reply?.channel ?? context?.channel;
+      if (request.startsWith(WAKE) || (!channel && key === COMMUNITY_SESSION)) {
         if (!continued.has(conversation)) {
           dropped.push({ submission, conversation });
           aborted.add(conversation);
@@ -1318,30 +1341,38 @@ export class PiRuntime {
       }
       // A watch's or timer's run ends with the app, as other harnesses' do:
       // continued, it would have no deadline, lane or Stop.
-      if (!context?.channel) {
+      if (!channel) {
         dropped.push({ submission, conversation });
         continue;
       }
-      // A conversation several threads share has no root: its failure is
-      // reported in the thread of the mention, whose id is the request.
-      const root =
-        reply?.root ??
-        context.root ??
-        (context.topLevel ? request : await this.threadOf(agent, request));
-      const where = reply ?? {
-        channel: context.channel,
-        root,
-        topLevel: !!context.topLevel,
-      };
+      // Community tool defaults can belong to another request. Older
+      // community runs without a saved destination still settle silently.
+      const where =
+        reply ??
+        (key === COMMUNITY_SESSION
+          ? undefined
+          : {
+              channel,
+              root:
+                context?.root ??
+                (context?.topLevel
+                  ? request
+                  : await this.threadOf(agent, request)),
+              topLevel: !!context?.topLevel,
+            });
+      const recoveredKey =
+        key ??
+        (context?.root
+          ? `${context.channel}/${context.root}`
+          : (context?.channel ?? channel));
       const receipt: Receipt = {
-        // Only a thread's own conversation has a root.
-        key:
-          key ??
-          (context.root
-            ? `${context.channel}/${context.root}`
-            : context.channel),
-        scope: where.topLevel ? context.channel : root,
-        where,
+        key: recoveredKey,
+        scope: where
+          ? where.topLevel
+            ? where.channel
+            : where.root
+          : recoveredKey,
+        ...(where ? { where } : {}),
       };
       // A delivery of the same request takes it over, and says how it ended.
       const ours = () => entry.receipts.get(request) === receipt;
@@ -1358,13 +1389,13 @@ export class PiRuntime {
           reply ? request : undefined,
         )
           .then(async (waited) => {
-            if (!ours()) return;
+            if (!ours() || !where) return;
             // An answer Pi wrote without `send` stays in local activity.
             if (waited.status === "unanswered" && waited.reason !== "aborted")
               await this.report(handle, where, unanswered(waited));
           })
           .catch(async (error: unknown) => {
-            if (ours() && !entry.closed)
+            if (ours() && where && !entry.closed)
               await this.report(handle, where, errorText(error));
           })
           .finally(() => {
