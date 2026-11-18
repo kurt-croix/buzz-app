@@ -241,7 +241,13 @@ if (thinkingHarness === "claude") {
     defaults: { model: "", effort: "" },
   };
   const provider = {
-    ...staticStore(providerState),
+    ...staticStore({
+      ...providerState,
+      ...(new URLSearchParams(location.search).has("modelsUnavailable") && {
+        data: undefined,
+        error: "Codex models could not be checked.",
+      }),
+    }),
     check: async () => {},
     recommended: () => null,
     resolve: (value: unknown) => ({

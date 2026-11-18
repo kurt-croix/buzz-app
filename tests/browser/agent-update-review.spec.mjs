@@ -95,7 +95,9 @@ test("a Codex agent's settings proposal persists only on the owner Save", async 
   });
   const save = review.getByRole("button", { name: "Save", exact: true });
   await expect(save).toBeInViewport();
-  await save.click();
+  await review
+    .getByRole("textbox", { name: "Name", exact: true })
+    .press("Enter");
   await expect(review).toHaveCount(0);
   expect(await saved()).toEqual([
     expect.objectContaining({
@@ -156,20 +158,27 @@ test("a proposed Huddle voice needs a verified catalog before Save", async ({
   ).not.toHaveProperty("voice");
 });
 
-test("owner review refuses an unavailable local Codex model", async ({
-  page,
-}) => {
-  await page.goto(
-    "/tests/fixtures/agent-library.html?settingsSync=codex&proposeSettings",
-  );
-  await page.evaluate(() =>
-    window.proposeFixtureSettings({ model: "missing-model" }),
-  );
-  const review = page.getByRole("dialog", { name: "Edit Ada" });
-  await expect(review).toContainText("missing-model");
-  await review.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(review.getByRole("alert")).toContainText(
-    "Choose an available Codex model or Codex default before saving.",
-  );
-  expect(await page.evaluate(() => window.updateReviewResult())).toEqual([]);
-});
+for (const catalog of [true, false]) {
+  test(`owner review checks a proposed local Codex model with catalog ${catalog ? "available" : "unchecked"}`, async ({
+    page,
+  }) => {
+    await page.goto(
+      `/tests/fixtures/agent-library.html?settingsSync=codex&proposeSettings${catalog ? "" : "&modelsUnavailable"}`,
+    );
+    const model = catalog ? "missing-model" : "codex-fixture-model";
+    await page.evaluate(
+      (model) => window.proposeFixtureSettings({ model }),
+      model,
+    );
+    const review = page.getByRole("dialog", { name: "Edit Ada" });
+    await expect(review).toContainText(model);
+    await review.getByRole("button", { name: "Save", exact: true }).click();
+    const error = catalog
+      ? "Choose an available Codex model or Codex default before saving."
+      : "Check Codex models or choose Codex default before saving.";
+    await expect(
+      review.getByRole("alert").filter({ hasText: error }),
+    ).toBeVisible();
+    expect(await page.evaluate(() => window.updateReviewResult())).toEqual([]);
+  });
+}

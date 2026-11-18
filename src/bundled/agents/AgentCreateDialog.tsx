@@ -597,6 +597,23 @@ export function AgentCreateDialog({
                   placeholder="Name"
                   value={name}
                   disabled={pending}
+                  onKeyDown={
+                    reviewingSettings
+                      ? (event) => {
+                          if (
+                            event.key !== "Enter" ||
+                            event.nativeEvent.isComposing
+                          )
+                            return;
+                          event.preventDefault();
+                          settingsActions
+                            ?.querySelector<HTMLButtonElement>(
+                              'button[type="submit"][form]',
+                            )
+                            ?.click();
+                        }
+                      : undefined
+                  }
                   onChange={(event) => {
                     setName(event.target.value);
                     namePrompt.named(event.target.value);
