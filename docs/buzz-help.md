@@ -518,7 +518,6 @@ and are asked to sign in again in Buzz.
   reports “created, not filed.” A write that cannot be
   confirmed reports that placement may have completed: inspect or refresh the
   reported chat before **Move to**, and never create it again.
-  This option is not available through external/standalone or Nexus requests.
   Solo chats can also be shared with other people; do not describe every Solo
   chat as visible only to its creator. In a Solo chat, including its first
   message, **@** can name anyone in the community. A tagged agent of yours joins
@@ -583,26 +582,16 @@ and are asked to sign in again in Buzz.
   **Review saved settings** to discard it and reload.
   Plugins can show ordinary chats in a plain list without workspace headings.
   Their saved workspace assignments stay in place.
-  With Nexus enabled, each workspace also contains its tasks and can have a Lead
-  task. Nexus saves and chooses Leads, so they exist only while Nexus is enabled.
-  Creating a workspace selects it so you can start a conversation with its Lead.
-  The title or blank row area opens the workspace's Lead, or a task composer if
-  it has none; sending from that composer makes the new task its Lead. Only the
-  chevron expands or collapses
-  the workspace. Hover Solo or a workspace and use **New task**, beside **…**, for another task. The button also appears with keyboard focus. **New task** is also in the workspace's **…** menu, the only place it shows when the header is too narrow, for example with enlarged text. Chat creation
-  is available only in **Chats**. The workspace itself stays selected while its Lead
-  conversation is open; the Lead has no separate task row. New task's agent picker
-  lists agents eligible to run the task on this device.
-  Without Nexus, chat creation remains available in the global **+** menu,
-  Solo and each workspace; creating a workspace opens a chat draft filed there.
+  By default, you can create a chat from the global **+** menu, Solo, or a
+  workspace. Creating a workspace opens a chat draft there. Plugins can provide
+  their own workspace views and actions.
   Folders are optional unless **Work in a new worktree** is on. In that mode,
   add at least one project folder; the form shows a message beside Folders
   until you add one or turn worktree mode off. In **New chat**, typing **#**
   lists your workspaces above channels; choosing one sets the composer's
-  workspace control and leaves no text in the message. A plugin's chat, such as
-  a Nexus task, shows the workspace control when its plugin files it; until
-  that chat's first message, **#** offers its workspaces too, and choosing one
-  files the chat right away.
+  workspace control and leaves no text in the message. A plugin's chat shows
+  the workspace control when the plugin files it. Before the first message,
+  **#** offers the plugin's workspaces. Choose one to file the chat there.
 - **Channel links.** Type **#** and part of a channel name to link a channel.
   The link is a chip: Backspace or Delete removes it whole, so to change it,
   remove it and pick again with **#**.

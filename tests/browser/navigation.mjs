@@ -28,7 +28,7 @@ export async function openPage(page, name, { connected = true } = {}) {
   await selectPage(page, name, { connected });
 }
 
-// Nexus composes chat creation inside Chats; ordinary Buzz keeps the global menu.
+// A plugin can provide chat creation inside Chats. The global menu is the default.
 export async function newChat(page) {
   // The community switcher appears after local startup has replaced the launch view.
   await expect(
