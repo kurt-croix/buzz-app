@@ -1192,6 +1192,10 @@ available rather than silently discarding it.
 
 ## Choosing and customizing agents
 
+Agents can use `agent_update` to propose their own harness settings. Review the
+proposed values and select **Save** to apply them, or close the review to discard
+the request.
+
 - An optional plugin can attach context to a native session. Follow-ups and
   reconnects keep that association. **New** starts another association. Each
   agent keeps its current conversation, reply placement and session controls.

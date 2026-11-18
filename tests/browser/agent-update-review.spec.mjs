@@ -39,3 +39,87 @@ test("agent changes wait for owner review in the agent's own settings form", asy
     }),
   ]);
 });
+
+test("a Codex agent's settings proposal persists only on the owner Save", async ({
+  page,
+}) => {
+  await page.goto(
+    "/tests/fixtures/agent-library.html?settingsSync=codex&proposeSettings",
+  );
+  const proposal = {
+    model: "codex-fixture-model",
+    effort: "high",
+    scope: "community",
+    workspace: "~/example",
+    voice: "maple",
+    apps: true,
+  };
+  const propose = () =>
+    page.evaluate((value) => window.proposeFixtureSettings(value), proposal);
+  const review = page.getByRole("dialog", { name: "Edit Ada" });
+  const saved = () => page.evaluate(() => window.updateReviewResult());
+  await propose();
+  await expect(review.getByRole("textbox", { name: "Workspace" })).toHaveValue(
+    "~/example",
+  );
+  await expect(
+    review.getByRole("combobox", { name: "Sessions" }),
+  ).toContainText("One session per community");
+  await expect(
+    review.getByRole("button", { name: "Huddle voice" }),
+  ).toContainText("Maple");
+  await expect(
+    review.getByRole("switch", { name: "Codex apps and plugins" }),
+  ).toBeChecked();
+  await expect(
+    review.getByRole("textbox", { name: "Instructions" }),
+  ).toHaveValue("Review the change.");
+
+  await review.getByRole("button", { name: "Huddle voice" }).click();
+  const chooser = page.getByRole("dialog", { name: "Choose voice" });
+  await chooser.getByRole("radio", { name: "Cove", exact: true }).click();
+  await chooser.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(
+    review.getByRole("button", { name: "Huddle voice" }),
+  ).toContainText("Cove");
+  expect(await saved()).toEqual([]);
+  await review.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(review).toHaveCount(0);
+  expect(await saved()).toEqual([]);
+
+  await propose();
+  await page.setViewportSize({ width: 390, height: 950 });
+  await page.evaluate(() => {
+    document.documentElement.classList.add("dark");
+    document.documentElement.style.fontSize = "20px";
+  });
+  const save = review.getByRole("button", { name: "Save", exact: true });
+  await expect(save).toBeInViewport();
+  await save.click();
+  await expect(review).toHaveCount(0);
+  expect(await saved()).toEqual([
+    expect.objectContaining({
+      config: expect.objectContaining({
+        ...proposal,
+        instructions: "Review the change.",
+      }),
+    }),
+  ]);
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByRole("gridcell", { name: "Ada", exact: true }).click();
+  await page.getByRole("tab", { name: "Settings", exact: true }).click();
+  const pane = page.getByRole("tabpanel", { name: "Settings", exact: true });
+  await expect(pane.getByRole("combobox", { name: "Sessions" })).toContainText(
+    "One session per community",
+  );
+  await expect(
+    pane.getByRole("button", { name: "Huddle voice" }),
+  ).toContainText("Maple");
+  await expect(
+    pane.getByRole("switch", { name: "Codex apps and plugins" }),
+  ).toBeChecked();
+  await expect(pane.getByRole("textbox", { name: "Workspace" })).toHaveValue(
+    "~/example",
+  );
+});

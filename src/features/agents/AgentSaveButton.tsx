@@ -79,6 +79,8 @@ function editingLineBottom(input: HTMLInputElement | HTMLTextAreaElement) {
 /** The agent sidebar supplies a footer; other hosts retain their inline action. */
 export const AgentSaveFooter = createContext<{
   target: HTMLElement | null;
+  /** The dialog already supplies sticky action chrome. */
+  dialog?: true;
   /** Retain recovery content through exit; data-agent-access-required="false"
    * reserves space without treating a read/save failure as signed out. */
   setPanelNotice?: (content: ReactNode) => void;
@@ -172,7 +174,13 @@ export function AgentSaveButton({
   useLayoutEffect(() => {
     const bar = frame.current;
     const scroll = footer?.target?.parentElement;
-    if (!visible || !bar || !scroll || typeof ResizeObserver === "undefined")
+    if (
+      footer?.dialog ||
+      !visible ||
+      !bar ||
+      !scroll ||
+      typeof ResizeObserver === "undefined"
+    )
       return;
     const reveal = () => {
       const input = document.activeElement;
@@ -199,7 +207,7 @@ export function AgentSaveButton({
       scroll.removeEventListener("input", reveal);
       document.removeEventListener("selectionchange", reveal);
     };
-  }, [footer?.target, visible]);
+  }, [footer?.dialog, footer?.target, visible]);
   const instant =
     reducedMotion ||
     document.documentElement.hasAttribute("data-keyboard-navigation");
@@ -211,15 +219,19 @@ export function AgentSaveButton({
     <Button
       type="submit"
       form={form}
-      variant="prominent"
+      variant={footer?.dialog ? "primary" : "prominent"}
       loading={saving}
       disabled={disabled}
       focusableWhenDisabled
-      style={footer?.target ? { width: "100%" } : undefined}
+      style={footer?.target && !footer.dialog ? { width: "100%" } : undefined}
     >
       {saving ? "Saving…" : "Save"}
     </Button>
   );
+  if (footer?.dialog)
+    return footer.target && visible
+      ? createPortal(button, footer.target)
+      : null;
   return footer?.target
     ? createPortal(
         <motion.div

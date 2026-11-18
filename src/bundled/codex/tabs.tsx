@@ -1471,6 +1471,13 @@ export function createTabs(
         });
         if (!validWorkspace(settings.workspace))
           throw new Error("Enter an absolute or ~/… workspace path.");
+        if (
+          settingsHost?.pendingSave &&
+          settings.voice &&
+          data?.voices &&
+          !data.voices.includes(settings.voice)
+        )
+          throw new Error("Choose an available Huddle voice.");
         // A Custom agent's save drops a mark left from before, which a later
         // blank synced model would otherwise turn back on.
         await save(

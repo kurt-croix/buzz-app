@@ -123,6 +123,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     description:
       "goose on this computer, with any provider goose supports. Each thread it is mentioned in is one continuing session.",
     defaults: () => ({ config: DEFAULT_CONFIG }),
+    settingsProposal: {},
     readModelSettings: (saved) =>
       readModelSettings(config(saved), {
         provider: true,

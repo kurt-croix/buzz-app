@@ -139,10 +139,11 @@ the available operations and arguments. Agent tools do not expose draft approval
 `agent_update` submits an unsaved draft of changes to one of the owner's local
 agents in the same community, named by pubkey or exact name: a new name, a type
 key from `agent_types`, new instructions or a new picture. An agent may propose
-changes to itself. Absent fields stay as they are. The
-owner reviews them in the New agent form, titled Edit and filled in with the
-agent's settings and the proposed changes, with the usual type-change preview;
-saving applies what the owner reviewed, and closing the review discards the
+changes to itself, including model, thinking effort, session scope, and workspace in
+supported local harnesses. Codex additionally accepts Huddle voice and its apps
+and plugins preference. The Edit dialog shows the proposed values in the usual
+settings controls, with a preview for a harness change. Absent fields stay as
+they are. Save applies the reviewed values. Closing the dialog discards the
 request. A type change carries what the new type adopts, as a manual one does. A proposed picture
 is a local PNG, JPEG, GIF or WebP file that the tool uploads to the community as
 the requesting agent once the request is valid, stripped of metadata as the

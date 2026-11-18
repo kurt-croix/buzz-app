@@ -5,6 +5,7 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -26,12 +27,15 @@ import {
 import { useRecommendedPick } from "../../features/agents/useRecommendedPick";
 import type {
   Agent,
+  AgentViewProps,
   Agents,
   RegisteredAgentType,
   NewAgent,
   AgentCreationRequest,
   AgentUpdateRequest,
 } from "../../features/agents/service";
+import { AgentSaveFooter } from "../../features/agents/AgentSaveButton";
+import { applySettingsProposal } from "../../features/agents/settings-proposal";
 import { PlugIcon, RobotIcon } from "../../shared/design-system/icons";
 import { Tooltip } from "../../shared/design-system/ui/Tooltip";
 import { Button } from "../../shared/design-system/ui/Button";
@@ -129,7 +133,11 @@ export function AgentCreateDialog({
   }>;
 }) {
   const edited = update?.agent;
+  const reviewingSettings = !!update?.request.settings;
   const [open, setOpen] = useState(true);
+  const [settingsActions, setSettingsActions] = useState<HTMLDivElement | null>(
+    null,
+  );
   const [name, setName] = useState(
     update
       ? (update.request.name ?? update.agent.name)
@@ -157,7 +165,12 @@ export function AgentCreateDialog({
       types[0]?.key ??
       "",
   );
-  const type = types.find((item) => item.key === typeKey) ?? types[0];
+  const choices = reviewingSettings
+    ? types.filter((item) => item.settingsProposal)
+    : types;
+  const type =
+    choices.find((item) => item.key === typeKey) ??
+    (reviewingSettings ? undefined : types[0]);
   const migration = (item: RegisteredAgentType | undefined) => {
     if (!edited || !item || item.key === edited.type) return undefined;
     try {
@@ -182,11 +195,24 @@ export function AgentCreateDialog({
       item?.key === agent.type
         ? agent.config
         : (migration(item)?.config ?? startingConfig(item));
-    return proposed.instructions !== undefined && item?.adopt
-      ? item.adopt({ instructions: proposed.instructions }, config)
-      : config;
+    const withInstructions =
+      proposed.instructions !== undefined && item?.adopt
+        ? item.adopt({ instructions: proposed.instructions }, config)
+        : config;
+    return proposed.settings &&
+      item?.key === (proposed.type ?? proposed.agentType)
+      ? applySettingsProposal(withInstructions, proposed.settings)
+      : withInstructions;
   };
   const [config, setConfig] = useState(() => seed(type));
+  const Settings = reviewingSettings
+    ? type?.tabs?.find((tab) => tab.role === "settings")?.component
+    : undefined;
+  const settingsAgent = useMemo(
+    () => (edited && type ? { ...edited, type: type.key, config } : undefined),
+    [edited, type, config],
+  );
+  const Form = reviewingSettings ? "div" : "form";
   const [automatic, setAutomatic] = useState(recommendable);
   const recommendation = useRecommendedPick(types, recommendable);
   const { pick } = recommendation.status === "found" ? recommendation : {};
@@ -297,10 +323,15 @@ export function AgentCreateDialog({
   };
   // Automatic has nothing to create with until, and unless, a pick is found.
   const waiting = automatic && !type?.remote && !pick;
-  const create = async (introduced = false) => {
-    if (!type || pending || avatarBusy || !canCreate || waiting) return;
+  const create = async (introduced = false, settings?: { config: unknown }) => {
+    if (!type || pending || waiting || (!settings && !canCreate)) return;
+    if (avatarBusy) {
+      if (settings) throw new Error("Wait for the picture to finish preparing");
+      return;
+    }
     if (!name.trim()) {
       namePrompt.prompt();
+      if (settings) throw new Error("Name the agent");
       return;
     }
     if (!update && type.remote && !introduced) {
@@ -317,22 +348,27 @@ export function AgentCreateDialog({
         type: type.key,
         name: name.trim(),
         ...(picture ? { picture } : {}),
-        ...(config !== undefined
-          ? {
-              config:
-                automatic && pick?.type.key === type.key
-                  ? withRecommended(config as object)
-                  : config,
-            }
-          : {}),
+        ...(settings
+          ? { config: settings.config }
+          : config !== undefined
+            ? {
+                config:
+                  automatic && pick?.type.key === type.key
+                    ? withRecommended(config as object)
+                    : config,
+              }
+            : {}),
       };
       if (update) await update.onSave(input);
       else onCreated(await (onCreate ? onCreate(input) : agents.create(input)));
     } catch (reason) {
-      setError(message(reason));
       setPending(false);
+      if (settings) throw reason;
+      setError(message(reason));
     }
   };
+  const saveSettings: AgentViewProps["save"] = (config) =>
+    create(false, { config });
   const harnessControl = (
     <PreferenceRow
       id={harnessId}
@@ -345,11 +381,11 @@ export function AgentCreateDialog({
             align="end"
             value={type?.key ?? ""}
             leading={<TypeIcon type={type} size={20} />}
-            disabled={pending || types.length < 2}
+            disabled={pending || choices.length < 2}
             groups={[true, false]
               .map((remote) => ({
                 label: remote ? "Remote" : "Local",
-                options: types
+                options: choices
                   .filter((item) => Boolean(item.remote) === remote)
                   .map((item) => ({
                     value: item.key,
@@ -360,7 +396,7 @@ export function AgentCreateDialog({
               .filter((group) => group.options.length > 0)}
             onValueChange={choose}
           />
-          {CreateAction && (
+          {CreateAction && !reviewingSettings && (
             <CreateAction
               key={type.key}
               {...(edited ? { agent: edited } : {})}
@@ -475,6 +511,8 @@ export function AgentCreateDialog({
               Let’s go
             </Button>
           </>
+        ) : reviewingSettings ? (
+          <div ref={setSettingsActions} />
         ) : (
           <SetUpFirst when={nothingSetUp}>
             <Button
@@ -501,16 +539,28 @@ export function AgentCreateDialog({
       }
     >
       {/* Preserve the draft and avatar preparation while showing the introduction. */}
-      <form
+      <Form
         hidden={showRemoteIntro}
         id={form}
         className={styles.form}
         data-error={error ? "" : undefined}
         aria-label={edited ? `Edit ${edited.name}` : "New agent"}
-        onSubmit={(event) => {
-          event.preventDefault();
-          void create();
-        }}
+        onFocusCapture={
+          reviewingSettings
+            ? (event) =>
+                reveal(
+                  event.target instanceof HTMLElement ? event.target : null,
+                )
+            : undefined
+        }
+        onSubmit={
+          reviewingSettings
+            ? undefined
+            : (event) => {
+                event.preventDefault();
+                void create();
+              }
+        }
       >
         <div className={styles.createStack}>
           <section aria-label="Identity" className={styles.profileIdentity}>
@@ -564,7 +614,9 @@ export function AgentCreateDialog({
               reveal(event.target instanceof HTMLElement ? event.target : null)
             }
           >
-            {recommendable && !type?.remote ? (
+            {reviewingSettings ? (
+              <SettingsGroup>{harnessControl}</SettingsGroup>
+            ) : recommendable && !type?.remote ? (
               // Local harnesses only. A hosted type, chosen under Manual's
               // Harness, keeps its own group below, as on main.
               <SettingsGroup>
@@ -625,7 +677,25 @@ export function AgentCreateDialog({
               <SettingsGroup>{localRows}</SettingsGroup>
             )}
           </section>
-          {Create ? (
+          {reviewingSettings ? (
+            Settings && settingsAgent && !edited?.configProblem ? (
+              <AgentSaveFooter.Provider
+                value={{ target: settingsActions, dialog: true }}
+              >
+                <Settings
+                  key={settingsAgent.type}
+                  agent={settingsAgent}
+                  save={saveSettings}
+                  settingsHost={{ pendingSave: saveSettings }}
+                />
+              </AgentSaveFooter.Provider>
+            ) : (
+              <p role="alert" className="m-0 text-body-sm text-danger">
+                {edited?.configProblem ??
+                  "Settings are unavailable for this harness."}
+              </p>
+            )
+          ) : Create ? (
             <Create
               key={type.key}
               config={config}
@@ -650,7 +720,7 @@ export function AgentCreateDialog({
           )}
         </div>
         {!showRemoteIntro && errorMessage}
-      </form>
+      </Form>
       {showRemoteIntro && (
         <div className="grid gap-3">
           <RemoteAgentIntroduction

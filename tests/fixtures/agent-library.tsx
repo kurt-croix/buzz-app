@@ -262,6 +262,7 @@ if (thinkingHarness === "claude") {
     key: "fixture/codex",
     id: "codex",
     title: "Codex",
+    settingsProposal: { voice: true, apps: true },
     defaults: () => ({ config: { ...codexDefaults } }),
     tabs: [
       {
@@ -382,6 +383,9 @@ if (harness === "hosted") {
     type: hosted.key,
   }));
 }
+const proposingSettings = new URLSearchParams(location.search).has(
+  "proposeSettings",
+);
 const reviewing = new URLSearchParams(location.search).has("review");
 const changing = new URLSearchParams(location.search).has("change");
 const types = thinkingTypes[thinkingHarness ?? ""]
@@ -396,7 +400,13 @@ const types = thinkingTypes[thinkingHarness ?? ""]
       : changing
         ? [type, other]
         : [type];
-if (changing) snapshot.running = snapshot.agents;
+if (changing || proposingSettings) {
+  snapshot.agents = snapshot.agents.map((agent) => ({
+    ...agent,
+    relay: "wss://relay.example",
+  }));
+  snapshot.running = snapshot.agents;
+}
 let updates: readonly AgentUpdateRequest[] = changing
   ? [
       {
@@ -443,6 +453,26 @@ const dismissUpdate = () => {
 Object.assign(window, {
   creationReviewResult: () => reviewed,
   updateReviewResult: () => changed,
+  proposeFixtureSettings: (settings: AgentUpdateRequest["settings"]) => {
+    const agent = snapshot.agents[0];
+    if (!proposingSettings || !agent || !settings)
+      throw new Error("Missing settings proposal fixture");
+    updates = [
+      {
+        id: "settings",
+        requester: agent.pubkey,
+        requesterName: agent.name,
+        owner: agent.owner,
+        community: "https://relay.example",
+        agent: agent.pubkey,
+        agentName: agent.name,
+        agentType: agent.type,
+        settings,
+        instructions: "Review the change.",
+      },
+    ];
+    for (const listener of listeners) listener();
+  },
 });
 const agents = {
   snapshot: () => snapshot,
@@ -463,6 +493,8 @@ const agents = {
   dismissUpdate,
   approveUpdate: async (_id: string, input: NewAgent) => {
     changed.push(input);
+    if (proposingSettings && snapshot.agents[0])
+      await agents.save(snapshot.agents[0].key, { config: input.config });
     dismissUpdate();
   },
   previewRetype: () => ({
@@ -613,6 +645,6 @@ createRoot(root).render(
       <AgentsPage agents={agents} relay={relay} />
     )}
     {reviewing && <CreationReview agents={agents} />}
-    {changing && <UpdateReview agents={agents} />}
+    {(changing || proposingSettings) && <UpdateReview agents={agents} />}
   </div>,
 );

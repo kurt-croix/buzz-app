@@ -62,6 +62,8 @@ function fixture(change: Partial<AgentUpdateRequest>, waiting = false) {
     key: "c".repeat(64),
     pubkey: "c".repeat(64),
     name: "Child",
+    owner: "b".repeat(64),
+    relay: "wss://relay.example",
     picture: "https://example.test/child.png",
     type: "test/echo",
     config: { reply: "Be brief.", model: "large" },

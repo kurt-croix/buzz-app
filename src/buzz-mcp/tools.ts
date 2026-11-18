@@ -46,6 +46,7 @@ import { channelLabelTags } from "../features/relay/channel-labels";
 import { SOLO_LABEL, SOLO_NAMED_LABEL } from "../features/solo/labels";
 import type { RelayEvent } from "../features/relay/events";
 import { attestedOwner } from "../features/agents/owner-attestation";
+import type { AgentSettingsProposal } from "../features/agents/settings-proposal";
 import type {
   BuzzClient,
   BuzzEvent,
@@ -158,8 +159,26 @@ export const TOOLS: readonly Tool[] = [
   ),
   tool(
     "agent_update",
-    "Submit an unsaved draft of changes to one of your owner's agents, yourself included, for them to review. agent is its pubkey or exact name; type is a key from agent_types; picture is a local image file for its avatar. Nothing changes until they save it.",
-    { agent: str, name: str, type: str, instructions: str, picture: str },
+    "Submit an unsaved draft of changes to one of your owner's agents, yourself included, for them to review. agent is its pubkey or exact name; type is a key from agent_types; picture is a local image file for its avatar. Only propose runtime settings for yourself. Nothing changes until the owner saves it.",
+    {
+      agent: str,
+      name: str,
+      type: str,
+      instructions: str,
+      picture: str,
+      model: { ...str, description: "Model ID; empty follows the default." },
+      effort: {
+        ...str,
+        description: "Thinking level; empty follows the default.",
+      },
+      scope: { type: "string", enum: ["thread", "channel", "community"] },
+      workspace: str,
+      voice: {
+        ...str,
+        description: "Huddle voice ID; empty follows the default.",
+      },
+      apps: { type: "boolean", description: "Allow Codex apps and plugins." },
+    },
     ["agent"],
   ),
   tool(
@@ -506,7 +525,11 @@ export function callTool(
   if (!handler) throw new Error(`No tool ${name}`);
   // A channel or member tool refuses arguments it does not list, so a
   // misspelled target cannot fall back to the current channel.
-  if (name.startsWith("channel_") || name.startsWith("member_")) {
+  if (
+    name.startsWith("channel_") ||
+    name.startsWith("member_") ||
+    name === "agent_update"
+  ) {
     const listed =
       TOOLS.find((tool) => tool.name === name)?.inputSchema.properties ?? {};
     const extra = Object.keys(args).filter(
@@ -592,7 +615,33 @@ const HANDLERS: Readonly<Record<string, Handler>> = {
     const name = text(args.name);
     const type = text(args.type);
     // Empty instructions propose clearing them.
-    const { instructions } = args;
+    const { instructions, model, effort, scope, workspace, voice, apps } = args;
+    for (const [key, value] of Object.entries({
+      model,
+      effort,
+      workspace,
+      voice,
+    })) {
+      if (value !== undefined && typeof value !== "string")
+        throw new Error(`${key} must be a string`);
+    }
+    if (
+      scope !== undefined &&
+      scope !== "thread" &&
+      scope !== "channel" &&
+      scope !== "community"
+    )
+      throw new Error("scope must be thread, channel or community");
+    if (apps !== undefined && typeof apps !== "boolean")
+      throw new Error("apps must be a boolean");
+    const settings: AgentSettingsProposal = {
+      ...(typeof model === "string" && { model }),
+      ...(typeof effort === "string" && { effort }),
+      ...(scope !== undefined && { scope }),
+      ...(typeof workspace === "string" && { workspace }),
+      ...(typeof voice === "string" && { voice }),
+      ...(typeof apps === "boolean" && { apps }),
+    };
     const picture = proposedPicture(client, args.picture);
     return JSON.stringify(
       await client.updateAgent({
@@ -600,6 +649,7 @@ const HANDLERS: Readonly<Record<string, Handler>> = {
         ...(name && { name }),
         ...(type && { type }),
         ...(typeof instructions === "string" && { instructions }),
+        ...(Object.keys(settings).length && { settings }),
         ...(picture && { picture }),
       }),
     );

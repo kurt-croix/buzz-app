@@ -73,6 +73,10 @@ import type { Expected, SnapshotRead } from "./agent-config-artifacts";
 import type { revertTemplate, SettingsCheck } from "./agent-config-history";
 import type { RevertOutcome } from "./AgentConfigHistory";
 import type { RecommendedCandidate } from "./recommended";
+import type {
+  AgentSettingsProposal,
+  AgentSettingsProposalSupport,
+} from "./settings-proposal";
 import { nativeRelayInfo } from "../relay/native";
 import { AgentRunners, type Connection, TIMEOUT_LIMIT_MS } from "./runner";
 import { CoreMemoryCache } from "./core-memory-cache";
@@ -1004,6 +1008,9 @@ export type AgentType<Config = unknown> = {
     config: Config,
     context?: AgentModelSettingsContext,
   ): AgentModelSettings;
+  /** The Settings tab reviews these drafts and writes only via its Save.
+   * Model, effort, scope and workspace use the standard config keys. */
+  settingsProposal?: AgentSettingsProposalSupport;
   /** Describes harness settings for a type-change preview. Rendered labels
    * never determine migration behavior. */
   describeMigration?(config: Config): readonly AgentMigrationSetting[];
@@ -1280,6 +1287,7 @@ export type AgentUpdate = Readonly<{
   type?: string;
   instructions?: string;
   picture?: string;
+  settings?: AgentSettingsProposal;
 }>;
 /** `agent` is a pubkey or the exact name of one of the owner's agents here. */
 export type AgentUpdateInput = Omit<AgentUpdate, "picture"> &
@@ -1613,7 +1621,7 @@ export type Agents = {
   dismissUpdate(id: string): void;
   /** Saves the owner-reviewed edit form, the agent's settings with the
    * request's changes, to the request's agent. */
-  approveUpdate(id: string, input: NewAgent): Promise<void>;
+  approveUpdate(id: string, input: NewAgent, opened?: Agent): Promise<void>;
   /** Local, unsaved team change requests; closing a review discards one. */
   teamUpdateRequests(): readonly TeamUpdateRequest[];
   dismissTeamUpdate(id: string): void;
@@ -2605,9 +2613,12 @@ export class AgentsService extends Service implements Agents {
             }),
             ...(picture !== undefined &&
               picture !== identity.picture && { picture }),
+            ...(proposed.settings && { settings: proposed.settings }),
           };
           if (Object.keys(change).length === 0 && !pending)
             throw new Error("Propose at least one change");
+          if (change.settings && identity.pubkey !== agent.pubkey)
+            throw new Error("You can only propose these settings for yourself");
           this.updateKind(identity, change);
           if (this.pendingRequests() >= 16)
             throw new Error("Review the pending agent requests first");
@@ -4129,7 +4140,7 @@ export class AgentsService extends Service implements Agents {
     this.updates = this.updates.filter((request) => request.id !== id);
     this.notify();
   };
-  async approveUpdate(id: string, input: NewAgent) {
+  async approveUpdate(id: string, input: NewAgent, opened?: Agent) {
     const request = this.updates.find((item) => item.id === id);
     if (!request || this.approving.has(id))
       throw new Error("No such pending agent request");
@@ -4137,6 +4148,7 @@ export class AgentsService extends Service implements Agents {
     const identity = this.identities.find(
       (member) =>
         member.pubkey === request.agent &&
+        member.owner === request.owner &&
         originOf(member.relay) === request.community &&
         !member.deleted,
     );
@@ -4145,6 +4157,24 @@ export class AgentsService extends Service implements Agents {
     const binding = this.bindingOf(identity);
     if (!binding || binding.controller.signal.aborted)
       throw new Error("Connect to the agent's community first");
+    if (request.settings) {
+      const current = this.view(identity, this.recordOf(identity));
+      if (
+        !opened ||
+        current.key !== opened.key ||
+        current.type !== opened.type ||
+        current.name !== opened.name ||
+        current.picture !== opened.picture ||
+        current.protectionRevision !== opened.protectionRevision ||
+        JSON.stringify(current.executionBinding) !==
+          JSON.stringify(opened.executionBinding) ||
+        JSON.stringify(current.config) !== JSON.stringify(opened.config) ||
+        JSON.stringify(current.configBase) !== JSON.stringify(opened.configBase)
+      )
+        throw new Error(
+          "The agent changed while this review was open. Close it and ask for a new proposal.",
+        );
+    }
     const { type, name, picture, config } = input;
     this.updateKind(identity, { name, type });
     const { key } = identity;
@@ -4161,6 +4191,7 @@ export class AgentsService extends Service implements Agents {
         name,
         ...(picture && { picture }),
         ...(!retyped && config !== undefined && { config }),
+        ...(opened?.configBase && { base: opened.configBase }),
       });
       this.updates = this.updates.filter((item) => item.id !== id);
       this.notify();
@@ -4287,7 +4318,7 @@ export class AgentsService extends Service implements Agents {
     };
   }
   /** The type `change` leaves the agent with, refusing what it cannot apply. */
-  private updateKind(identity: AgentIdentity, change: AgentUpdate) {
+  private updateKind(identity: Member, change: AgentUpdate) {
     if (change.name !== undefined && !change.name.trim())
       throw new Error("Name the agent");
     const kind = this.types().find(
@@ -4298,6 +4329,26 @@ export class AgentsService extends Service implements Agents {
       throw new Error("A hosted provider cannot take over a local agent key");
     if (change.instructions !== undefined && !kind.adopt)
       throw new Error(`${kind.title} agents have no instructions to change`);
+    if (change.settings) {
+      const { voice, apps, workspace } = change.settings;
+      const support = kind.settingsProposal;
+      if (!support)
+        throw new Error(`${kind.title} does not accept settings proposals`);
+      if (voice !== undefined && !support.voice)
+        throw new Error(`${kind.title} does not offer a Huddle voice setting`);
+      if (apps !== undefined && !support.apps)
+        throw new Error(`${kind.title} does not offer a Codex apps setting`);
+      if (apps === true && identity.protection)
+        throw new Error(
+          "Protected agents cannot enable Codex apps and plugins",
+        );
+      if (
+        support.apps &&
+        this.executions.read(identity.key) &&
+        (apps !== undefined || workspace !== undefined)
+      )
+        throw new Error("The execution adapter manages apps and workspace");
+    }
     return kind;
   }
   /** Whether watch classifiers can run on this device: the selected
