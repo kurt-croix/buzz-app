@@ -73,9 +73,10 @@ import type { Expected, SnapshotRead } from "./agent-config-artifacts";
 import type { revertTemplate, SettingsCheck } from "./agent-config-history";
 import type { RevertOutcome } from "./AgentConfigHistory";
 import type { RecommendedCandidate } from "./recommended";
-import type {
-  AgentSettingsProposal,
-  AgentSettingsProposalSupport,
+import {
+  type AgentSettingsProposal,
+  type AgentSettingsProposalSupport,
+  settingsProposalProblem,
 } from "./settings-proposal";
 import { nativeRelayInfo } from "../relay/native";
 import { AgentRunners, type Connection, TIMEOUT_LIMIT_MS } from "./runner";
@@ -4176,6 +4177,13 @@ export class AgentsService extends Service implements Agents {
         throw new Error(
           "The agent changed while this review was open. Close it and ask for a new proposal.",
         );
+      const problem = settingsProposalProblem(
+        request.settings,
+        current,
+        current.executionBinding,
+        request.agentType,
+      );
+      if (problem) throw new Error(problem);
     }
     const { type, name, picture, config } = input;
     this.updateKind(identity, {
@@ -4337,7 +4345,7 @@ export class AgentsService extends Service implements Agents {
     if (change.instructions !== undefined && !kind.adopt)
       throw new Error(`${kind.title} agents have no instructions to change`);
     if (change.settings) {
-      const { voice, apps, workspace } = change.settings;
+      const { voice, apps } = change.settings;
       const support = kind.settingsProposal;
       if (!support)
         throw new Error(`${kind.title} does not accept settings proposals`);
@@ -4345,15 +4353,12 @@ export class AgentsService extends Service implements Agents {
         throw new Error(`${kind.title} does not offer a Huddle voice setting`);
       if (apps !== undefined && !support.apps)
         throw new Error(`${kind.title} does not offer a Codex apps setting`);
-      if (apps === true && identity.protection)
-        throw new Error(
-          "Protected agents cannot enable Codex apps and plugins",
-        );
-      if (
-        this.executions.read(identity.key) &&
-        (apps !== undefined || workspace !== undefined)
-      )
-        throw new Error("The execution adapter manages apps and workspace");
+      const problem = settingsProposalProblem(
+        change.settings,
+        identity,
+        this.executions.read(identity.key),
+      );
+      if (problem) throw new Error(problem);
     }
     return kind;
   }

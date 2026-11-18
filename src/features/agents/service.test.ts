@@ -21858,4 +21858,19 @@ it("keeps a self settings proposal out of agent state until its owner approves t
   await service.approveUpdate(fresh.id, approved, service.find(bot));
   expect(service.find(bot)?.config).toEqual(approved.config);
   expect(service.updateRequests()).toEqual([]);
+
+  await propose();
+  const [beforeRetype] = service.updateRequests();
+  if (!beforeRetype) throw new Error("Missing pre-retype review");
+  await service.retype(bot, "example/echo");
+  const afterRetype = service.find(bot);
+  if (!afterRetype) throw new Error("Missing retyped agent");
+  await expect(
+    service.approveUpdate(
+      beforeRetype.id,
+      { type: afterRetype.type, name: afterRetype.name },
+      afterRetype,
+    ),
+  ).rejects.toThrow("changed harnesses after this proposal");
+  expect(service.updateRequests()[0]?.id).toBe(beforeRetype.id);
 });

@@ -33,7 +33,11 @@ const kind = (key: string, title: string) => ({
   Create,
 });
 
-function fixture(change: Partial<AgentUpdateRequest>, waiting = false) {
+function fixture(
+  change: Partial<AgentUpdateRequest>,
+  waiting = false,
+  agentState?: Partial<Agent>,
+) {
   const request: AgentUpdateRequest = {
     id: "draft",
     requester: "a".repeat(64),
@@ -67,6 +71,7 @@ function fixture(change: Partial<AgentUpdateRequest>, waiting = false) {
     picture: "https://example.test/child.png",
     type: "test/echo",
     config: { reply: "Be brief.", model: "large" },
+    ...agentState,
   } as unknown as Agent;
   let snapshot = { running: [agent] };
   const agents = {
@@ -196,3 +201,34 @@ it("discards an unsaved change request when the owner closes its review", async 
   );
   expect(agents.approveUpdate).not.toHaveBeenCalled();
 });
+
+it.each([
+  {
+    agentState: { type: "test/other" },
+    settings: { model: "medium" },
+    message: "The agent changed harnesses after this proposal",
+  },
+  {
+    agentState: { executionBinding: { provider: "test/remote", config: {} } },
+    settings: { workspace: "/work/task" },
+    message: "The execution adapter manages apps and workspace",
+  },
+  {
+    agentState: { protection: { provider: "test/protection", policy: {} } },
+    settings: { apps: true },
+    message: "Protected agents cannot enable Codex apps and plugins",
+  },
+])(
+  "explains why a proposal can no longer be saved before review",
+  async ({ agentState, message, settings }) => {
+    const user = userEvent.setup();
+    const agents = fixture({ settings }, false, agentState);
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(
+      screen.queryByRole("button", { name: /save/i }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^Close$/ }));
+    expect(agents.dismissUpdate).toHaveBeenCalledWith("draft");
+    expect(agents.approveUpdate).not.toHaveBeenCalled();
+  },
+);

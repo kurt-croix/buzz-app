@@ -1,5 +1,7 @@
 import { useState, useSyncExternalStore } from "react";
 import { communityDestination } from "../../features/communities/destination";
+import { settingsProposalProblem } from "../../features/agents/settings-proposal";
+import { Dialog } from "../../shared/design-system/ui/Dialog";
 import { AgentCreateDialog } from "./AgentCreateDialog";
 import type {
   Agent,
@@ -40,6 +42,32 @@ export function UpdateReview({ agents }: { agents: Agents }) {
   if (request && agent && (held?.id !== request.id || held.agent !== agent))
     hold({ id: request.id, agent });
   if (!request || !agent) return null;
+  const problem =
+    request.settings &&
+    settingsProposalProblem(
+      request.settings,
+      agent,
+      agent.executionBinding,
+      request.agentType,
+    );
+  if (problem)
+    return (
+      <Dialog
+        key={request.id}
+        open
+        title={`Edit ${agent.name}`}
+        size="compact"
+        closeLabel="Close"
+        dismissOnOutsideClick={false}
+        onOpenChange={(open) => {
+          if (!open) agents.dismissUpdate(request.id);
+        }}
+      >
+        <p role="alert" className="m-0 text-body-sm text-danger">
+          {problem} Close this review and ask the agent for a new proposal.
+        </p>
+      </Dialog>
+    );
   return (
     <AgentCreateDialog
       key={request.id}
