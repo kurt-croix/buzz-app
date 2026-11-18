@@ -82,7 +82,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     placement: "menu",
     matches: (message, session) =>
       (!!message.threadRootId || message.replyCount > 0) &&
-      canStartLinkedChat(session, message.channelId) &&
+      canStartLinkedChat(session) &&
       (!message.delivery || ["accepted", "seen"].includes(message.delivery)),
     component: AskBestieAction,
   });

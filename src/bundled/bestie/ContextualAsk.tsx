@@ -693,7 +693,7 @@ export function CatchUpBestieAction({
     !saved.read ||
     saved.error ||
     !bestie ||
-    !canStartLinkedChat(session, row.channel.id)
+    !canStartLinkedChat(session)
   )
     return null;
   const activeBestie = bestie;
